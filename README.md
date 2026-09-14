@@ -1,6 +1,8 @@
 # FrostLabs Guild Roster Client
 
-Private Windows companion for the FrostLabs Hogwarts Academy guild roster system.
+Private Windows client for the FrostLabs Hogwarts Academy guild roster system.
+
+This is a **standalone application**. It is separate from Azeroth Questing Companion: it has its own repository, executable, installer, install location, local settings, update channel, release history, and lifecycle. The only thing intentionally reused from Azeroth Questing Companion is the proven user experience pattern for update checks, installer staging, integrity verification, and in-place upgrades.
 
 The client reads Guild Roster Manager (GRM) SavedVariables from World of Warcraft Retail, normalizes the configured guild roster into the FrostLabs `FGR1` protocol, and uploads complete validated snapshots to the LAN-only Guild Roster API on Services01.
 
@@ -50,7 +52,9 @@ The API remains LAN-only.
 
 ## Automatic client updates
 
-The update experience intentionally mirrors the Azeroth Questing Companion:
+The Guild Roster Client owns its **own** update path. It does not update Azeroth Questing Companion and Azeroth Questing Companion does not update it.
+
+Its update experience intentionally mirrors the Azeroth Questing Companion:
 
 - check for updates on client startup;
 - support `stable` and `beta` channels;
@@ -85,7 +89,7 @@ The outbox is retry state only. The canonical roster/history database remains Po
 
 The project targets .NET 10 Windows Forms and produces a self-contained Windows x64 build.
 
-GitHub Actions builds `GuildRosterClient-Setup.exe` using Inno Setup on each push to `main`. A commit whose message starts with `Release client v` also creates/updates a private GitHub Release.
+GitHub Actions builds `GuildRosterClient-Setup.exe` using Inno Setup on each push to `main`. A commit whose message starts with `Release client v` also creates/updates a private GitHub Release for this client only.
 
 The initial private build is not yet declared a stable production release. Code-signing policy can be added before a future broadly distributed stable build.
 
