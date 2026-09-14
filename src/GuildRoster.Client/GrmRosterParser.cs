@@ -10,6 +10,15 @@ internal static class GrmRosterParser
     private const string CurrentRosterVariable = "GRM_GuildMemberHistory_Save";
     private const int MaxExpectedMembers = 1000;
 
+    private static readonly HashSet<string> KnownGuildMetadataFields = new(StringComparer.Ordinal)
+    {
+        "grmName",
+        "grmClubID",
+        "grmNumRanks",
+        "ranks",
+        "grmCreationDate",
+    };
+
     private static readonly JsonSerializerOptions HashJsonOptions = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -37,13 +46,10 @@ internal static class GrmRosterParser
             throw new InvalidDataException($"GRM current-roster data does not contain '{guildKey}'.");
         }
 
-        if (guildTable.Fields.Count == 0)
+        var grmName = Normalize(guildTable.GetString("grmName"));
+        if (grmName is not null && !string.Equals(grmName, guildKey, StringComparison.Ordinal))
         {
-            throw new InvalidDataException("GRM returned an empty current guild roster. Empty snapshots are rejected for safety.");
-        }
-        if (guildTable.Fields.Count > MaxExpectedMembers)
-        {
-            throw new InvalidDataException($"GRM returned {guildTable.Fields.Count:N0} members, above the client safety limit of {MaxExpectedMembers:N0}.");
+            throw new InvalidDataException($"GRM guild metadata identifies '{grmName}' instead of '{guildKey}'. Snapshot rejected.");
         }
 
         var members = new List<GrmRosterMember>(guildTable.Fields.Count);
@@ -51,9 +57,14 @@ internal static class GrmRosterParser
 
         foreach (var entry in guildTable.Fields.OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
         {
+            if (KnownGuildMetadataFields.Contains(entry.Key))
+            {
+                continue;
+            }
+
             if (entry.Value is not LuaTable memberTable)
             {
-                throw new InvalidDataException($"GRM roster entry '{entry.Key}' was not a member table. Snapshot rejected.");
+                throw new InvalidDataException($"GRM guild field '{entry.Key}' is not recognized as metadata or a member table. Snapshot rejected.");
             }
 
             var member = ParseMember(entry.Key, memberTable);
@@ -64,9 +75,13 @@ internal static class GrmRosterParser
             members.Add(member);
         }
 
-        if (members.Count != guildTable.Fields.Count)
+        if (members.Count == 0)
         {
-            throw new InvalidDataException("Not every GRM current-roster entry could be normalized. Snapshot rejected.");
+            throw new InvalidDataException("GRM returned an empty current guild roster. Empty snapshots are rejected for safety.");
+        }
+        if (members.Count > MaxExpectedMembers)
+        {
+            throw new InvalidDataException($"GRM returned {members.Count:N0} members, above the client safety limit of {MaxExpectedMembers:N0}.");
         }
 
         members.Sort((left, right) => string.Compare(left.PlayerGuid, right.PlayerGuid, StringComparison.Ordinal));
