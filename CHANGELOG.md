@@ -9,6 +9,7 @@ The project follows a simple chronological changelog while the client is under i
 ### Added
 
 - Created the private `Frostcanvas/Guild-Roster-Client` repository for the Windows Guild Roster Client.
+- Established the Guild Roster Client as a standalone Windows application with its own executable, installer, install location, settings, update channel, release history, and lifecycle, separate from Azeroth Questing Companion.
 - Added the initial .NET 10 Windows Forms client shell and self-contained Windows x64 build project.
 - Established Guild Roster Manager (GRM) SavedVariables as the initial data source.
 - Established `Guild_Roster_Manager.lua` as the file the client will discover and monitor.
@@ -23,7 +24,7 @@ The project follows a simple chronological changelog while the client is under i
 - Added automatic client update checks with `stable` and `beta` channels.
 - Added update download staging under `%LOCALAPPDATA%\FrostLabs\GuildRoster\Updates\<version>`.
 - Added SHA-256 and file-size verification before an update installer can run.
-- Added silent elevated Inno Setup update launch with close/restart application behavior matching the Azeroth Questing Companion update flow.
+- Added silent elevated Inno Setup update launch with close/restart behavior patterned after the Azeroth Questing Companion update flow while remaining fully independent from that application.
 - Added seven-day cleanup for stale update installer caches.
 - Added a LAN-only Services01 update feed design so the private GitHub repository does not require a GitHub PAT inside the installed client.
 - Added GitHub Actions Windows builds and private GitHub Release creation for `Release client v...` commits.
