@@ -7,6 +7,10 @@ internal sealed class ClientSettings
     public string? SourceSavedVariablesPath { get; set; }
     public string ServerBaseUrl { get; set; } = "http://10.0.10.246:8767";
     public string UpdateChannel { get; set; } = "stable";
+    public string GuildName { get; set; } = "Hogwarts Academy";
+    public string GuildRealm { get; set; } = "BleedingHollow";
+    public string? InstallationId { get; set; }
+    public bool AutoSync { get; set; } = true;
 }
 
 internal static class SettingsService
