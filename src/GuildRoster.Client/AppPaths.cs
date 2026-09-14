@@ -8,6 +8,8 @@ internal static class AppPaths
         "GuildRoster");
 
     public static string SettingsPath => Path.Combine(Root, "settings.json");
+    public static string CredentialPath => Path.Combine(Root, "auth.bin");
+    public static string SyncStatePath => Path.Combine(Root, "sync-state.json");
     public static string UpdatesRoot => Path.Combine(Root, "Updates");
     public static string OutboxRoot => Path.Combine(Root, "Outbox");
 
