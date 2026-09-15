@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 
 namespace GuildRoster.Client;
 
-internal sealed record PairingResult(Guid InstallationId, string BearerToken);
+internal sealed record RegistrationResult(Guid InstallationId, string BearerToken);
 internal sealed record UploadResult(string Status, long SnapshotId, int? MemberCount);
 
 internal sealed class GuildRosterApiException : Exception
@@ -39,36 +39,83 @@ internal sealed class GuildRosterApiClient : IDisposable
             new ProductInfoHeaderValue("FrostLabsGuildRosterClient", "0.1"));
     }
 
-    public async Task<PairingResult> PairAsync(
-        string serverBaseUrl,
-        string pairingCode,
-        string label,
+    public async Task<RegistrationResult> EnsureRegisteredAsync(
+        ClientSettings settings,
         string companionVersion,
         CancellationToken cancellationToken = default)
     {
-        var server = NormalizeServer(serverBaseUrl);
-        var body = new PairRequest
+        var existingToken = CredentialStore.LoadToken();
+        if (!string.IsNullOrWhiteSpace(existingToken))
         {
-            Code = pairingCode.Trim(),
-            Label = label,
+            _ = Guid.TryParse(settings.InstallationId, out var existingInstallationId);
+            return new RegistrationResult(existingInstallationId, existingToken);
+        }
+
+        if (!Guid.TryParse(settings.ClientInstanceId, out var clientInstanceId))
+        {
+            clientInstanceId = Guid.NewGuid();
+            settings.ClientInstanceId = clientInstanceId.ToString("D");
+            SettingsService.Save(settings);
+        }
+
+        try
+        {
+            return await RegisterOnceAsync(
+                settings,
+                clientInstanceId,
+                companionVersion,
+                cancellationToken);
+        }
+        catch (GuildRosterApiException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
+        {
+            // Same behavior as Azeroth Questing Companion: if local credential
+            // state was lost but the old anonymous instance ID remains server-side,
+            // create a fresh local instance identity without asking the user for a
+            // pairing code or shared recovery secret.
+            clientInstanceId = Guid.NewGuid();
+            settings.ClientInstanceId = clientInstanceId.ToString("D");
+            settings.InstallationId = null;
+            SettingsService.Save(settings);
+            return await RegisterOnceAsync(
+                settings,
+                clientInstanceId,
+                companionVersion,
+                cancellationToken);
+        }
+    }
+
+    private async Task<RegistrationResult> RegisterOnceAsync(
+        ClientSettings settings,
+        Guid clientInstanceId,
+        string companionVersion,
+        CancellationToken cancellationToken)
+    {
+        var server = NormalizeServer(settings.ServerBaseUrl);
+        var body = new AutoRegistrationRequest
+        {
+            ClientInstanceId = clientInstanceId,
+            Label = Environment.MachineName,
             CompanionVersion = companionVersion,
         };
 
         using var response = await _httpClient.PostAsJsonAsync(
-            $"{server}/api/v1/installations/pair",
+            $"{server}/api/v1/installations/auto-register",
             body,
             _jsonOptions,
             cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
 
-        var result = await response.Content.ReadFromJsonAsync<PairResponse>(_jsonOptions, cancellationToken)
-            ?? throw new InvalidDataException("Services01 returned an empty pairing response.");
+        var result = await response.Content.ReadFromJsonAsync<RegistrationResponse>(_jsonOptions, cancellationToken)
+            ?? throw new InvalidDataException("Services01 returned an empty registration response.");
         if (result.InstallationId == Guid.Empty || string.IsNullOrWhiteSpace(result.BearerToken))
         {
-            throw new InvalidDataException("Services01 returned an incomplete pairing response.");
+            throw new InvalidDataException("Services01 returned an incomplete registration response.");
         }
 
-        return new PairingResult(result.InstallationId, result.BearerToken);
+        CredentialStore.SaveToken(result.BearerToken);
+        settings.InstallationId = result.InstallationId.ToString("D");
+        SettingsService.Save(settings);
+        return new RegistrationResult(result.InstallationId, result.BearerToken);
     }
 
     public async Task<UploadResult> UploadSnapshotAsync(
@@ -110,6 +157,13 @@ internal sealed class GuildRosterApiClient : IDisposable
         {
             return false;
         }
+    }
+
+    public static void ClearRegistration(ClientSettings settings)
+    {
+        CredentialStore.Clear();
+        settings.InstallationId = null;
+        SettingsService.Save(settings);
     }
 
     private async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -155,10 +209,10 @@ internal sealed class GuildRosterApiClient : IDisposable
 
     public void Dispose() => _httpClient.Dispose();
 
-    private sealed class PairRequest
+    private sealed class AutoRegistrationRequest
     {
-        [JsonPropertyName("code")]
-        public required string Code { get; init; }
+        [JsonPropertyName("client_instance_id")]
+        public Guid ClientInstanceId { get; init; }
 
         [JsonPropertyName("label")]
         public string? Label { get; init; }
@@ -167,7 +221,7 @@ internal sealed class GuildRosterApiClient : IDisposable
         public string? CompanionVersion { get; init; }
     }
 
-    private sealed class PairResponse
+    private sealed class RegistrationResponse
     {
         [JsonPropertyName("installation_id")]
         public Guid InstallationId { get; init; }
