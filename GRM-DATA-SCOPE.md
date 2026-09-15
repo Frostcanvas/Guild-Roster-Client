@@ -104,6 +104,7 @@ A restore offer is specifically triggered by a validated **Inactive -> Active** 
 - **Ask Later** keeps the offer pending and defers the next prompt for one day.
 - The same recovery event is unique by Player GUID plus reactivated roster snapshot, so normal repeated synchronization does not create duplicate prompts.
 - Existing history is merged rather than overwritten. Join/rejoin history must preserve the earlier join period, leave event when known, and the new rejoin event.
+- Membership history is displayed **newest first (reverse chronological)** so the latest event is at the top. For a returned member, the visible order is `Rejoined` -> `Left` -> `Joined`; additional cycles continue in the same newest-first event order.
 - Character name and realm are not sufficient identity keys. A same-name record with a different player GUID never receives automatic historical restore; it requires manual review.
 - Before any future write-back, preserve the current pre-restore state and log the restored, skipped, or rejected fields.
 
