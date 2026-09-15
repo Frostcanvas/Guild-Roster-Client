@@ -12,6 +12,22 @@ The project follows a simple chronological changelog while the client is under i
 - Link roster identities to Discord numeric user IDs through the shared Guild Roster database.
 - Allow Guild Executive to consume the shared Guild Roster person/identity view without becoming the canonical roster store.
 
+## 0.1.0 Beta 3 - 2026-09-14
+
+### Changed
+
+- Reworked the client to match the Azeroth Questing Companion user experience instead of requiring a visible manual pairing step.
+- Removed pairing from the normal client workflow. The client now self-registers with Services01 in the background using a random local `client_instance_id`, receives its own bearer token, and protects that token with Windows DPAPI.
+- Added automatic recovery behavior matching AQ: if a local token is lost but its old client-instance ID is already registered, the client creates a new random instance ID and registers itself again without asking for a code or shared secret.
+- Replaced the basic default WinForms layout with an AQ-style dark dashboard, sidebar navigation, top action bar, status cards, and recent-activity view.
+- Changed multi-account GRM discovery so the client automatically prefers a `Guild_Roster_Manager.lua` source containing `Hogwarts Academy-BleedingHollow`, then chooses the most recently written matching source. Manual source override remains available.
+- Simplified the normal workflow to: detect GRM -> validate roster -> queue -> automatically register if needed -> upload -> retry when offline.
+
+### Compatibility
+
+- The older one-time pairing endpoints may remain available on Services01 as an optional controlled troubleshooting/recovery path, but Beta 3 does not display a Pair Client button and does not require a pairing code for normal operation.
+- FGR1 complete-snapshot validation, SHA-256 deduplication, local retry/outbox behavior, DPAPI token protection, automatic GRM watching, and Active/Inactive safety semantics remain unchanged.
+
 ## 0.1.0 Beta 2 - 2026-09-14
 
 ### Added
@@ -25,7 +41,7 @@ The project follows a simple chronological changelog while the client is under i
 - Added a retryable local outbox at `%LOCALAPPDATA%\FrostLabs\GuildRoster\Outbox`; validated snapshots are removed only after Services01 returns `accepted` or `duplicate`.
 - Added persisted non-secret sync state at `%LOCALAPPDATA%\FrostLabs\GuildRoster\sync-state.json`.
 - Added `Sync Now` and automatic synchronization after GRM writes `Guild_Roster_Manager.lua`.
-- Added one-time Services01 client pairing. The standalone client accepts a 15-minute single-use pairing code rather than containing the protected server registration key.
+- Added one-time Services01 client pairing in Beta 2. This manual onboarding flow is superseded by Beta 3 automatic registration for normal use.
 - Added per-installation bearer authentication for FGR1 uploads.
 - Added Windows DPAPI protection for the per-installation bearer token in `%LOCALAPPDATA%\FrostLabs\GuildRoster\auth.bin`.
 - Added pairing/sync status, queued snapshot count, last successful sync information, and automatic retry behavior to the Windows client UI.
