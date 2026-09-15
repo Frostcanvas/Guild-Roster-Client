@@ -9,6 +9,7 @@ internal sealed class ClientSettings
     public string UpdateChannel { get; set; } = "stable";
     public string GuildName { get; set; } = "Hogwarts Academy";
     public string GuildRealm { get; set; } = "BleedingHollow";
+    public string? ClientInstanceId { get; set; }
     public string? InstallationId { get; set; }
     public bool AutoSync { get; set; } = true;
 }
