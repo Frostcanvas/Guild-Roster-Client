@@ -76,12 +76,26 @@ internal static class GrmArchiveApiClient
             row.CurrentValues)).ToArray();
     }
 
+    public static Task DecideRecoveryOfferAsync(
+        string serverBaseUrl,
+        string bearerToken,
+        long offerId,
+        string decision,
+        CancellationToken cancellationToken = default) =>
+        DecideRecoveryOfferAsync(
+            serverBaseUrl,
+            bearerToken,
+            offerId,
+            decision,
+            Array.Empty<string>(),
+            cancellationToken);
+
     public static async Task DecideRecoveryOfferAsync(
         string serverBaseUrl,
         string bearerToken,
         long offerId,
         string decision,
-        IReadOnlyList<string>? selectedFields = null,
+        IReadOnlyList<string> selectedFields,
         CancellationToken cancellationToken = default)
     {
         var server = NormalizeServer(serverBaseUrl);
@@ -94,7 +108,7 @@ internal static class GrmArchiveApiClient
                 new RecoveryDecisionRequest
                 {
                     Decision = decision,
-                    SelectedFields = selectedFields?.ToList() ?? new List<string>(),
+                    SelectedFields = selectedFields.ToList(),
                 },
                 options: JsonOptions),
         };
