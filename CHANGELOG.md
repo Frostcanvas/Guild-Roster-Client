@@ -6,29 +6,36 @@ The project follows a simple chronological changelog while the client is under i
 
 ## [Unreleased]
 
-### Changed
+### Planned integration
 
-- Switched the next-release updater design from the Services01 manifest feed to direct anonymous GitHub Releases access, matching Azeroth Questing Companion more closely.
-- The updater now targets the planned public release-only repository `Frostcanvas/Guild-Roster-Client-Releases` while source remains private in `Frostcanvas/Guild-Roster-Client`.
-- Stable update checks ignore prereleases; Beta checks include prereleases and stable releases and select the newest eligible version.
-- The updater requires the exact `GuildRosterClient-Setup.exe` asset plus a GitHub-provided SHA-256 digest before an installer can run.
-- Services01 client-update routes remain only as a compatibility/bootstrap bridge for Beta 1-3 during the transition to Beta 4; they are not the intended normal update source for Beta 4 and later.
-- No GitHub PAT or reusable GitHub credential will be embedded in the installed client.
+- Extend the normalized server model for GRM main/alt relationships and selected GRM historical/backfill fields.
+- Link roster identities to Discord numeric user IDs through the shared Guild Roster database.
+- Allow Guild Executive to consume the shared Guild Roster person/identity view without becoming the canonical roster store.
 
 ### Release process
 
 - Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version.
-- Current progression is `0.1.0-beta.3`; the next functional client test build will be `0.1.0-beta.4`, followed by `beta.5`, `beta.6`, and so on.
+- After `0.1.0-beta.4`, the next functional client test build is `beta.5`, then `beta.6`, and so on.
 - Internal source/documentation commits may occur between installer releases without consuming a beta number.
-- This policy avoids stale installer caches, ambiguous update manifests, and same-version replacement issues encountered in earlier client work.
+- The GitHub Actions release step fails if the release tag already exists instead of overwriting the existing installer.
 
-### Planned integration
+## 0.1.0 Beta 4 - 2026-09-14
 
-- Create the public release-only repository `Frostcanvas/Guild-Roster-Client-Releases` before Beta 4 is handed off.
-- Publish the Beta 4 installer to that public GitHub Releases repository and use the existing Services01 feed only once as the upgrade bridge for already-installed Beta 1-3 clients.
-- Extend the normalized server model for GRM main/alt relationships and selected GRM historical/backfill fields.
-- Link roster identities to Discord numeric user IDs through the shared Guild Roster database.
-- Allow Guild Executive to consume the shared Guild Roster person/identity view without becoming the canonical roster store.
+### Changed
+
+- Changed `Frostcanvas/Guild-Roster-Client` from private to public so the installed client can read its own GitHub Releases anonymously, matching the Azeroth Questing Companion update model without embedding a GitHub PAT.
+- Removed the planned separate `Guild-Roster-Client-Releases` repository from the design. Source, build workflow, release history, and installer releases now live in the same public `Frostcanvas/Guild-Roster-Client` repository.
+- Switched the Beta 4 updater from the Services01 manifest feed to the public GitHub Releases API.
+- Stable update checks ignore prereleases. Beta update checks include prereleases and stable releases and select the newest eligible version.
+- The updater requires the exact `GuildRosterClient-Setup.exe` release asset and a GitHub-provided SHA-256 digest before installation; expected file size is also validated when supplied.
+- GitHub release publishing is immutable: an existing `client-v<version>` release causes the workflow to fail instead of replacing the asset under the same beta number.
+- Services01 client-update routes remain only as a compatibility/bootstrap bridge for Beta 1-3 during the Beta 4 transition; Beta 4 and later use GitHub directly for normal updates.
+
+### Recovery / distribution
+
+- Public source reconstructability is now `https://github.com/Frostcanvas/Guild-Roster-Client`, default branch `main`.
+- GitHub release assets and the Services01 compatibility update cache remain reconstructable distribution artifacts, not canonical roster data.
+- No Services01 backup was promoted by this change.
 
 ## 0.1.0 Beta 3 - 2026-09-14
 
@@ -79,8 +86,7 @@ The project follows a simple chronological changelog while the client is under i
 
 ### Added
 
-- Created the private `Frostcanvas/Guild-Roster-Client` repository.
-- Established the Guild Roster Client as a standalone Windows application with its own executable, installer, install location, settings, update channel, release history, and lifecycle, separate from Azeroth Questing Companion.
+- Created `Frostcanvas/Guild-Roster-Client` as a standalone Windows application repository with its own executable, installer, install location, settings, update channel, release history, and lifecycle, separate from Azeroth Questing Companion.
 - Added the initial .NET 10 Windows Forms client shell and self-contained Windows x64 build project.
 - Established Guild Roster Manager (GRM) SavedVariables as the initial data source.
 - Established `Guild_Roster_Manager.lua` as the file the client discovers and monitors.
@@ -93,10 +99,9 @@ The project follows a simple chronological changelog while the client is under i
 - Added automatic client update checks with `stable` and `beta` channels.
 - Added update download staging under `%LOCALAPPDATA%\FrostLabs\GuildRoster\Updates\<version>`.
 - Added SHA-256 and file-size verification before an update installer can run.
-- Added silent elevated Inno Setup update launch with close/restart behavior patterned after Azeroth Questing Companion while remaining fully independent from that application.
+- Added silent elevated Inno Setup update launch with close/replace/restart behavior patterned after Azeroth Questing Companion while remaining fully independent from that application.
 - Added seven-day cleanup for stale update installer caches.
-- Added a LAN-only Services01 update-feed design so the private GitHub repository does not require a GitHub PAT inside the installed client.
-- Added GitHub Actions Windows builds and private GitHub Release creation for `Release client v...` commits.
+- Added GitHub Actions Windows builds and GitHub Release creation for `Release client v...` commits.
 - Added the initial Inno Setup installer for `GuildRosterClient.exe`.
 
 ### Safety
@@ -104,4 +109,3 @@ The project follows a simple chronological changelog while the client is under i
 - GRM SavedVariables are data only; the client does not execute imported Lua.
 - The client does not read WoW process memory, inject into the game, or automate gameplay.
 - Published builds do not contain a reusable server registration key, bridge key, GitHub PAT, or administrative secret.
-- Private GitHub release access is not performed from installed clients.
