@@ -1,6 +1,6 @@
 # Full GRM data capture scope
 
-Status: **Beta 6 implementation committed; Windows build/installer validation and Services01 archive/bootstrap apply/recovery verification passed; immutable Beta 6 release pending.**
+Status: **Beta 6 released. Services01 archive/recovery API is live and its bootstrap recovery verification passed once. Manual guild-note repair remains intentionally deferred behind the planned passive `Review Notes (X)` workflow.**
 
 Approved: 2026-09-14
 Implementation started: 2026-09-15
@@ -29,7 +29,7 @@ The supplied source contains these top-level GRM assignments, all of which are i
 
 ## Beta 6 implementation
 
-The committed Beta 6 foundation now provides two layers:
+The released Beta 6 foundation provides two layers:
 
 1. a lossless parsed archive that retains every safely parsed top-level `GRM_*` assignment in a mixed keyed/positional representation so unknown fields are not silently discarded;
 2. normalized restore profiles keyed by complete Blizzard Player GUID for current/former member recovery workflows.
@@ -58,13 +58,13 @@ Explicit operator-approved restore scope is limited to:
 
 Every restore must preview current versus recovered values and preserve the pre-restore state first.
 
-The committed Beta 6 foundation implements **detection, preview, field selection, and protected restore-request recording**. It does **not** yet write the selected values back into World of Warcraft or GRM. Actual write-back remains a separate explicit restore step so archived data cannot silently overwrite current guild state.
+The Beta 6 release implements **detection, preview, field selection, and protected restore-request recording**. It does **not** yet write the selected values back into World of Warcraft or GRM. Actual write-back remains a separate explicit step so archived data cannot silently overwrite current guild state.
 
 ## Manual guild-note repair helper
 
 Retail note-writing restrictions mean the client must treat Public/Officer note repair as a guided operator workflow rather than automatic write-back. The helper will build a resumable queue from the latest validated Hogwarts Academy GRM/archive state and present the exact values to enter through Blizzard's guild UI.
 
-The note-repair workflow is intentionally **deferred and passive** while the rest of Beta 6 is being completed. The client must not interrupt synchronization with note-repair prompts or automatically open the repair workflow. Instead, the dashboard/top bar will expose a button labeled **`Review Notes (X)`**, where `X` is the number of unresolved manual guild-note repair items. The count may accumulate while other Guild Roster work continues; the queue opens only when the operator clicks the button.
+The note-repair workflow is intentionally **deferred and passive** while the rest of the Guild Roster integration is completed. The client must not interrupt synchronization with note-repair prompts or automatically open the repair workflow. Instead, a later client build will expose a dashboard/top-bar button labeled **`Review Notes (X)`**, where `X` is the number of unresolved manual guild-note repair items. The count may accumulate while other Guild Roster work continues; the queue opens only when the operator clicks the button.
 
 `Review Notes (X)` count rules:
 
@@ -111,8 +111,10 @@ A restore offer is specifically triggered by a validated **Inactive -> Active** 
 
 Blizzard/runtime facts such as class, race, level, online/last-online state, reputation, achievements, professions, and similar fields are archive/display data and are not written back.
 
-## Release direction
+## Release evidence
 
-`0.1.0-beta.5` remains immutable. Current Beta 6 source head `21ada6ec5cba5b1861d9512afbe7e8acefea404d` passed GitHub Actions run `34933078224`: restore, self-contained Windows publish, executable verification, Inno Setup installer build, and artifact upload all passed. Services01 Beta 6 static validation, isolated archive/bootstrap apply, and the required single bootstrap recovery verification also passed. The next intentional release is `client-v0.1.0-beta.6`; existing release tags and installers must never be overwritten.
+`0.1.0-beta.5` remains immutable. Beta 6 was published as immutable prerelease `client-v0.1.0-beta.6` from release commit `f28879699f21b097ff1f708b87d9fc0ce472cb73`. GitHub Actions run `34934087361` passed restore, self-contained Windows publish, executable verification, Inno Setup installer build, artifact upload, and GitHub prerelease publication. The published `GuildRosterClient-Setup.exe` is `37,294,046` bytes with SHA-256 `65f783cb58dd4ea11d4d501157f8b73902b0397ff01c97b334838cfad71bc9af`.
+
+Services01 Beta 6 static validation, isolated archive/bootstrap apply, and the required single bootstrap recovery verification also passed before release. Existing release tags and installers are never overwritten; the next functional client release must use a later beta number.
 
 No roster dump, secret, bearer token, registration key, Discord bot token, private key, password, or other protected value is committed to this repository.
