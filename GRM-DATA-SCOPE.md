@@ -9,7 +9,7 @@ The FrostLabs Guild Roster Client expands beyond selected GRM fields and preserv
 
 ## Source
 
-The client reads `Guild_Roster_Manager.lua` as data only. It never executes imported Lua, reads World of Warcraft process memory, injects into WoW, or automates gameplay.
+The client reads `Guild_Roster_Manager.lua` as data only. It never executes imported Lua, reads WoW process memory, injects into WoW, or automates gameplay.
 
 The supplied source contains these top-level GRM assignments, all of which are in archive scope:
 
@@ -59,6 +59,26 @@ Explicit operator-approved restore scope is limited to:
 Every restore must preview current versus recovered values and preserve the pre-restore state first.
 
 The committed Beta 6 foundation implements **detection, preview, field selection, and protected restore-request recording**. It does **not** yet write the selected values back into World of Warcraft or GRM. Actual write-back remains a separate explicit restore step so archived data cannot silently overwrite current guild state.
+
+## Manual guild-note repair helper
+
+Retail note-writing restrictions mean the client must treat Public/Officer note repair as a guided operator workflow rather than automatic write-back. The helper will build a resumable queue from the latest validated Hogwarts Academy GRM/archive state and present the exact values to enter through Blizzard's guild UI.
+
+Queue behavior:
+
+- active characters are ordered **A-Z by character name**, case-insensitive; realm is the deterministic tie-breaker;
+- the complete Blizzard Player GUID remains the identity key behind each queue item;
+- a declared main receives the suggested Public Note `<CharacterName>-Main`;
+- a declared alt receives the suggested Public Note `<MainCharacterName>-Alt`;
+- characters with unknown/ambiguous main-alt evidence are flagged for manual review instead of receiving an invented Public Note;
+- the suggested Officer Note is `Joined: <date>` only when GRM join-date/history evidence supports the date; ambiguous/unknown dates are flagged rather than guessed;
+- current Public/Officer notes, retained historical note evidence, and the suggested value are shown together before the operator marks the item complete;
+- exact already-correct notes are skipped automatically from the repair queue;
+- differing non-empty current notes are never silently replaced and require explicit operator review;
+- the helper tracks **Done**, **Skip**, and **Needs Review** so the alphabetical queue can be resumed later without losing progress;
+- no guild rank changes are included in this helper.
+
+The helper may select/open the relevant member and provide copy-ready text, but it must not bypass Blizzard protections or attempt unsupported automated Public/Officer note writes.
 
 ## Returning-member recovery trigger
 
