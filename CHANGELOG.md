@@ -6,6 +6,15 @@ The project follows a simple chronological changelog while the client is under i
 
 ## [Unreleased]
 
+### Changed
+
+- Switched the next-release updater design from the Services01 manifest feed to direct anonymous GitHub Releases access, matching Azeroth Questing Companion more closely.
+- The updater now targets the planned public release-only repository `Frostcanvas/Guild-Roster-Client-Releases` while source remains private in `Frostcanvas/Guild-Roster-Client`.
+- Stable update checks ignore prereleases; Beta checks include prereleases and stable releases and select the newest eligible version.
+- The updater requires the exact `GuildRosterClient-Setup.exe` asset plus a GitHub-provided SHA-256 digest before an installer can run.
+- Services01 client-update routes remain only as a compatibility/bootstrap bridge for Beta 1-3 during the transition to Beta 4; they are not the intended normal update source for Beta 4 and later.
+- No GitHub PAT or reusable GitHub credential will be embedded in the installed client.
+
 ### Release process
 
 - Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version.
@@ -15,6 +24,8 @@ The project follows a simple chronological changelog while the client is under i
 
 ### Planned integration
 
+- Create the public release-only repository `Frostcanvas/Guild-Roster-Client-Releases` before Beta 4 is handed off.
+- Publish the Beta 4 installer to that public GitHub Releases repository and use the existing Services01 feed only once as the upgrade bridge for already-installed Beta 1-3 clients.
 - Extend the normalized server model for GRM main/alt relationships and selected GRM historical/backfill fields.
 - Link roster identities to Discord numeric user IDs through the shared Guild Roster database.
 - Allow Guild Executive to consume the shared Guild Roster person/identity view without becoming the canonical roster store.
@@ -93,4 +104,4 @@ The project follows a simple chronological changelog while the client is under i
 - GRM SavedVariables are data only; the client does not execute imported Lua.
 - The client does not read WoW process memory, inject into the game, or automate gameplay.
 - Published builds do not contain a reusable server registration key, bridge key, GitHub PAT, or administrative secret.
-- Private GitHub release access is not performed from installed clients; update distribution uses the LAN-only Services01 feed instead.
+- Private GitHub release access is not performed from installed clients.
