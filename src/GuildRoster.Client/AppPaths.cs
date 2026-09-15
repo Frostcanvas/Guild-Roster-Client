@@ -13,6 +13,8 @@ internal static class AppPaths
     public static string UpdatesRoot => Path.Combine(Root, "Updates");
     public static string OutboxRoot => Path.Combine(Root, "Outbox");
     public static string GrmArchiveOutboxRoot => Path.Combine(Root, "GrmArchiveOutbox");
+    public static string GrmRestoreBackupRoot => Path.Combine(Root, "RestoreBackups");
+    public static string GrmRestoreAuditRoot => Path.Combine(Root, "RestoreAudit");
 
     public static void EnsureCreated()
     {
@@ -20,5 +22,7 @@ internal static class AppPaths
         Directory.CreateDirectory(UpdatesRoot);
         Directory.CreateDirectory(OutboxRoot);
         Directory.CreateDirectory(GrmArchiveOutboxRoot);
+        Directory.CreateDirectory(GrmRestoreBackupRoot);
+        Directory.CreateDirectory(GrmRestoreAuditRoot);
     }
 }

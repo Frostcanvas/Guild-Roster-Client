@@ -8,6 +8,9 @@ internal static class Program
         AppPaths.EnsureCreated();
         ClientUpdateService.CleanupStaleUpdateDirectories();
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm());
+
+        using var form = new MainForm();
+        using var recoveryPrompts = new RecoveryPromptService(form);
+        Application.Run(form);
     }
 }
