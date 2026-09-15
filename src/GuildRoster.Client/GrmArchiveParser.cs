@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -9,6 +10,7 @@ internal static partial class GrmArchiveParser
     private const string CurrentMembersVariable = "GRM_GuildMemberHistory_Save";
     private const string FormerMembersVariable = "GRM_PlayersThatLeftHistory_Save";
     private const string AltGroupsVariable = "GRM_Alts";
+    private const string LogReportVariable = "GRM_LogReport_Save";
     private const int MaxArchiveDepth = 200;
 
     [GeneratedRegex(@"(?m)^\s*(GRM_[A-Za-z0-9_]+)\s*=\s*", RegexOptions.CultureInvariant)]
@@ -55,6 +57,8 @@ internal static partial class GrmArchiveParser
 
         var guildKey = $"{roster.GuildName}-{roster.GuildRealm}";
         var profiles = BuildRestoreProfiles(parsedRoots, guildKey);
+        AttachNoteHistory(parsedRoots, guildKey, profiles);
+
         var sourceSha256 = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
         var archiveIdentity = Encoding.UTF8.GetBytes($"grm-archive-v1|{guildKey}|{sourceSha256}");
         var archiveKey = Convert.ToHexStringLower(SHA256.HashData(archiveIdentity));
@@ -124,6 +128,134 @@ internal static partial class GrmArchiveParser
         }
 
         return profiles;
+    }
+
+    private static void AttachNoteHistory(
+        IReadOnlyDictionary<string, LuaTable> parsedRoots,
+        string guildKey,
+        IReadOnlyList<GrmRestoreProfilePayload> profiles)
+    {
+        if (!parsedRoots.TryGetValue(LogReportVariable, out var logRoot) ||
+            !logRoot.TryGetTable(guildKey, out var guildLog))
+        {
+            return;
+        }
+
+        var byFullName = profiles
+            .Where(profile => !string.IsNullOrWhiteSpace(profile.CharacterName) && !string.IsNullOrWhiteSpace(profile.CharacterRealm))
+            .GroupBy(
+                profile => $"{profile.CharacterName}-{profile.CharacterRealm}",
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+
+        var byShortName = profiles
+            .Where(profile => !string.IsNullOrWhiteSpace(profile.CharacterName))
+            .GroupBy(profile => profile.CharacterName!, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Select(profile => profile.PlayerGuid).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var value in guildLog.Values)
+        {
+            if (value is not LuaTable row || row.Values.Count < 6)
+            {
+                continue;
+            }
+
+            var eventType = ToInt(row.Values[0]);
+            if (eventType is not (4 or 5))
+            {
+                continue;
+            }
+
+            var target = Normalize(StripWowFormatting(ToScalarString(row.Values[2])));
+            if (target is null)
+            {
+                continue;
+            }
+
+            GrmRestoreProfilePayload[]? matchingProfiles = null;
+            if (target.Contains('-', StringComparison.Ordinal) && byFullName.TryGetValue(target, out var fullMatches))
+            {
+                matchingProfiles = fullMatches;
+            }
+            else if (byShortName.TryGetValue(target, out var shortMatches))
+            {
+                matchingProfiles = shortMatches;
+            }
+
+            if (matchingProfiles is null || matchingProfiles.Length == 0)
+            {
+                continue;
+            }
+
+            var historyKey = eventType == 4 ? "public_note_history" : "officer_note_history";
+            var eventName = eventType == 4 ? "public_note" : "officer_note";
+            var oldValue = Normalize(ToScalarString(row.Values[3]));
+            var newValue = Normalize(ToScalarString(row.Values[4]));
+            var historyEvent = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["event_type"] = eventName,
+                ["message"] = Normalize(ToScalarString(row.Values[1])),
+                ["target"] = target,
+                ["old_value"] = oldValue,
+                ["new_value"] = newValue,
+                ["occurred_at"] = ConvertLuaValue(row.Values[5], 0),
+            };
+
+            foreach (var profile in matchingProfiles)
+            {
+                if (!profile.RestoreData.TryGetValue(historyKey, out var existing) || existing is not List<object?> history)
+                {
+                    history = new List<object?>();
+                    profile.RestoreData[historyKey] = history;
+                }
+                history.Add(historyEvent);
+            }
+        }
+
+        foreach (var profile in profiles)
+        {
+            AddLatestRemovedNoteCandidate(profile, "public_note", "public_note_history", "public_note_recovery_candidate");
+            AddLatestRemovedNoteCandidate(profile, "officer_note", "officer_note_history", "officer_note_recovery_candidate");
+        }
+    }
+
+    private static void AddLatestRemovedNoteCandidate(
+        GrmRestoreProfilePayload profile,
+        string currentKey,
+        string historyKey,
+        string candidateKey)
+    {
+        if (profile.RestoreData.TryGetValue(currentKey, out var current) && current is string currentText && !string.IsNullOrWhiteSpace(currentText))
+        {
+            return;
+        }
+        if (!profile.RestoreData.TryGetValue(historyKey, out var historyValue) || historyValue is not List<object?> history)
+        {
+            return;
+        }
+
+        for (var index = history.Count - 1; index >= 0; index--)
+        {
+            if (history[index] is not Dictionary<string, object?> entry)
+            {
+                continue;
+            }
+
+            var newValue = entry.TryGetValue("new_value", out var newObject) ? Normalize(newObject as string) : null;
+            if (newValue is not null)
+            {
+                profile.RestoreData[candidateKey] = newValue;
+                return;
+            }
+
+            var oldValue = entry.TryGetValue("old_value", out var oldObject) ? Normalize(oldObject as string) : null;
+            if (oldValue is not null)
+            {
+                profile.RestoreData[candidateKey] = oldValue;
+                return;
+            }
+        }
     }
 
     private static void CollectMemberProfiles(
@@ -210,7 +342,7 @@ internal static partial class GrmArchiveParser
             var altGroupLeft = member.GetInt("altGroupLeft");
             if (altGroupLeft is > 0)
             {
-                altGroup = altGroupLeft.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                altGroup = altGroupLeft.Value.ToString(CultureInfo.InvariantCulture);
             }
         }
 
@@ -284,12 +416,29 @@ internal static partial class GrmArchiveParser
         };
     }
 
+    private static string StripWowFormatting(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+        return Regex.Replace(value, @"\|c[0-9A-Fa-f]{8}|\|r", string.Empty, RegexOptions.CultureInvariant);
+    }
+
     private static string? ToScalarString(object? value) => value switch
     {
         string text => text,
-        long integer => integer.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        double number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        long integer => integer.ToString(CultureInfo.InvariantCulture),
+        double number => number.ToString(CultureInfo.InvariantCulture),
         bool boolean => boolean ? "true" : "false",
+        _ => null,
+    };
+
+    private static int? ToInt(object? value) => value switch
+    {
+        long integer when integer >= int.MinValue && integer <= int.MaxValue => (int)integer,
+        double number when number >= int.MinValue && number <= int.MaxValue => (int)Math.Round(number),
+        string text when int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
         _ => null,
     };
 
