@@ -10,7 +10,6 @@ internal sealed class MainForm : Form
     private static readonly Color Sidebar = Color.FromArgb(20, 23, 34);
     private static readonly Color Surface = Color.FromArgb(24, 28, 40);
     private static readonly Color SurfaceAlt = Color.FromArgb(30, 34, 49);
-    private static readonly Color Border = Color.FromArgb(50, 56, 78);
     private static readonly Color TextPrimary = Color.FromArgb(238, 240, 248);
     private static readonly Color TextSecondary = Color.FromArgb(163, 170, 194);
     private static readonly Color Gold = Color.FromArgb(231, 181, 67);
@@ -27,7 +26,7 @@ internal sealed class MainForm : Form
     private readonly Label _clientVersionValue = CreateValueLabel("Starting...");
     private readonly Label _sourceValue = CreateValueLabel("Detecting...");
     private readonly Label _serverValue = CreateValueLabel("Checking...");
-    private readonly Label _queueValue = CreateValueLabel("0");
+    private readonly Label _queueValue = CreateValueLabel("0 queued");
     private readonly Label _rosterValue = CreateValueLabel("Not synced");
     private readonly Label _lastSyncValue = CreateValueLabel("None yet");
     private readonly Label _updateValue = CreateValueLabel("Not checked");
@@ -51,7 +50,6 @@ internal sealed class MainForm : Form
     private FileSystemWatcher? _watcher;
     private CancellationTokenSource? _watchDebounce;
     private bool _syncInProgress;
-    private bool _busy;
 
     public MainForm()
     {
@@ -99,7 +97,6 @@ internal sealed class MainForm : Form
         };
         shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
         shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-
         shell.Controls.Add(BuildSidebar(), 0, 0);
         shell.Controls.Add(BuildMainArea(), 1, 0);
         Controls.Add(shell);
@@ -123,7 +120,6 @@ internal sealed class MainForm : Form
             BackColor = Sidebar,
             Padding = new Padding(12),
         };
-
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -139,7 +135,7 @@ internal sealed class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
 
-        var brand = new Label
+        layout.Controls.Add(new Label
         {
             Dock = DockStyle.Fill,
             Text = "GR\nGuild Roster",
@@ -147,25 +143,23 @@ internal sealed class MainForm : Form
             ForeColor = Gold,
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(8, 4, 0, 4),
-        };
-        layout.Controls.Add(brand, 0, 0);
+        }, 0, 0);
 
-        layout.Controls.Add(CreateNavButton("Home", (_, _) => SetStatus("Guild Roster dashboard ready."), active: true), 0, 1);
-        layout.Controls.Add(CreateNavButton("Sync", async (_, _) => await SyncRosterAsync(forceCurrentSnapshot: true, silent: false)), 0, 2);
+        layout.Controls.Add(CreateNavButton("Home", (_, _) => SetStatus("Guild Roster dashboard ready."), true), 0, 1);
+        layout.Controls.Add(CreateNavButton("Sync", async (_, _) => await SyncRosterAsync(true, false)), 0, 2);
         layout.Controls.Add(CreateNavButton("Roster", (_, _) => OpenRoster()), 0, 3);
         layout.Controls.Add(CreateNavButton("Source", (_, _) => BrowseForSource()), 0, 4);
         layout.Controls.Add(CreateNavButton("Settings", (_, _) => ToggleUpdateChannel()), 0, 5);
         layout.Controls.Add(CreateNavButton("Logs", (_, _) => OpenPath(AppPaths.Root)), 0, 6);
-
-        var footer = new Label
+        layout.Controls.Add(new Label
         {
             Dock = DockStyle.Fill,
             Text = "HOGWARTS ACADEMY",
             Font = new Font("Segoe UI", 8, FontStyle.Bold),
             ForeColor = TextSecondary,
             TextAlign = ContentAlignment.MiddleCenter,
-        };
-        layout.Controls.Add(footer, 0, 8);
+        }, 0, 8);
+
         panel.Controls.Add(layout);
         return panel;
     }
@@ -182,7 +176,6 @@ internal sealed class MainForm : Form
         main.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
         main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         main.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-
         main.Controls.Add(BuildTopBar(), 0, 0);
         main.Controls.Add(BuildDashboardBody(), 0, 1);
 
@@ -210,8 +203,8 @@ internal sealed class MainForm : Form
             WrapContents = false,
         };
 
-        _checkUpdatesButton.Click += async (_, _) => await CheckForUpdatesAsync(showDialog: true);
-        _syncButton.Click += async (_, _) => await SyncRosterAsync(forceCurrentSnapshot: true, silent: false);
+        _checkUpdatesButton.Click += async (_, _) => await CheckForUpdatesAsync(true);
+        _syncButton.Click += async (_, _) => await SyncRosterAsync(true, false);
         _channelButton.Click += (_, _) => ToggleUpdateChannel();
         _openRosterButton.Click += (_, _) => OpenRoster();
         _sourceButton.Click += (_, _) => BrowseForSource();
@@ -233,14 +226,12 @@ internal sealed class MainForm : Form
             BackColor = Background,
             Padding = new Padding(20),
         };
-
         var body = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 1,
             BackColor = Background,
-            Padding = new Padding(0),
         };
 
         var hero = new Panel
@@ -251,19 +242,18 @@ internal sealed class MainForm : Form
             Padding = new Padding(22),
             Margin = new Padding(0, 0, 0, 18),
         };
-        var heroTitle = new Label
+        hero.Controls.Add(new Label
         {
             AutoSize = true,
             Text = "Hogwarts Academy Guild Roster",
             Font = new Font("Segoe UI", 20, FontStyle.Bold),
             ForeColor = TextPrimary,
             Location = new Point(20, 18),
-        };
+        });
         _heroStatusValue.Location = new Point(22, 62);
         _heroStatusValue.Font = new Font("Segoe UI", 11, FontStyle.Regular);
         _heroStatusValue.MaximumSize = new Size(860, 0);
         _autoSync.Location = new Point(22, 94);
-        hero.Controls.Add(heroTitle);
         hero.Controls.Add(_heroStatusValue);
         hero.Controls.Add(_autoSync);
         body.Controls.Add(hero);
@@ -280,7 +270,6 @@ internal sealed class MainForm : Form
         cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
         cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
         cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
-
         cards.Controls.Add(CreateMetricCard("CLIENT VERSION", _clientVersionValue), 0, 0);
         cards.Controls.Add(CreateMetricCard("GRM SOURCE", _sourceValue), 1, 0);
         cards.Controls.Add(CreateMetricCard("SERVICES01", _serverValue), 2, 0);
@@ -289,26 +278,24 @@ internal sealed class MainForm : Form
         cards.Controls.Add(CreateMetricCard("QUEUE / UPDATES", BuildQueueUpdateValue()), 2, 1);
         body.Controls.Add(cards);
 
-        var info = new Label
+        body.Controls.Add(new Label
         {
             AutoSize = true,
             MaximumSize = new Size(920, 0),
-            Text = "Works like Azeroth Questing Companion: it watches the local SavedVariables file, registers itself with Services01 automatically in the background, keeps a retry queue, and synchronizes without asking you for a pairing code. GRM Lua is read as data only and is never executed.",
+            Text = "Works like Azeroth Questing Companion: it watches the local SavedVariables file, registers itself with Services01 automatically in the background, keeps a retry queue, and syncs without asking you for a pairing code. GRM Lua is read as data only and is never executed.",
             Font = new Font("Segoe UI", 10),
             ForeColor = TextSecondary,
             Margin = new Padding(2, 4, 2, 18),
-        };
-        body.Controls.Add(info);
+        });
 
-        var activityHeader = new Label
+        body.Controls.Add(new Label
         {
             AutoSize = true,
             Text = "Recent Activity",
             Font = new Font("Segoe UI", 13, FontStyle.Bold),
             ForeColor = TextPrimary,
             Margin = new Padding(0, 0, 0, 8),
-        };
-        body.Controls.Add(activityHeader);
+        });
 
         _activityList.Height = 210;
         _activityList.Dock = DockStyle.Top;
@@ -340,7 +327,7 @@ internal sealed class MainForm : Form
 
     private async Task InitializeAsync()
     {
-        SetBusy(true, "Detecting Guild Roster Manager...");
+        SetStatus("Detecting Guild Roster Manager...");
         try
         {
             DiscoverSource();
@@ -353,20 +340,16 @@ internal sealed class MainForm : Form
 
             if (_settings.AutoSync && SourceLocator.IsValidSavedVariablesDirectory(_settings.SourceSavedVariablesPath))
             {
-                await SyncRosterAsync(forceCurrentSnapshot: false, silent: true);
+                await SyncRosterAsync(false, true);
             }
 
-            await CheckForUpdatesAsync(showDialog: false);
+            await CheckForUpdatesAsync(false);
             SetStatus("Guild Roster Client ready.");
         }
         catch (Exception ex)
         {
             LogActivity("Startup: " + ex.Message);
             SetStatus("Ready with a startup warning.");
-        }
-        finally
-        {
-            SetBusy(false);
         }
     }
 
@@ -386,7 +369,7 @@ internal sealed class MainForm : Form
         {
             _settings.SourceSavedVariablesPath = preferred.SavedVariablesDirectory;
             SettingsService.Save(_settings);
-            LogActivity($"GRM source selected automatically: {preferred.SavedVariablesDirectory}");
+            LogActivity("GRM source selected automatically: " + preferred.SavedVariablesDirectory);
         }
 
         RefreshSourceStatus();
@@ -409,7 +392,7 @@ internal sealed class MainForm : Form
         var accountName = Directory.GetParent(path!)?.Name ?? "WoW account";
         _sourceValue.Text = $"{accountName} · {info.LastWriteTime:G}";
         _sourceValue.ForeColor = Green;
-        _heroStatusValue.Text = $"Watching {filePath}";
+        _heroStatusValue.Text = "Watching " + filePath;
         _heroStatusValue.ForeColor = TextSecondary;
     }
 
@@ -511,14 +494,14 @@ internal sealed class MainForm : Form
             LogActivity("GRM SavedVariables changed.");
             if (_settings.AutoSync)
             {
-                _ = SyncRosterAsync(forceCurrentSnapshot: false, silent: true);
+                _ = SyncRosterAsync(false, true);
             }
         }));
     }
 
     private async Task SyncRosterAsync(bool forceCurrentSnapshot, bool silent)
     {
-        if (_syncInProgress || _busy)
+        if (_syncInProgress)
         {
             return;
         }
@@ -538,7 +521,8 @@ internal sealed class MainForm : Form
         }
 
         _syncInProgress = true;
-        SetBusy(true, "Reading GRM roster...");
+        _syncButton.Enabled = false;
+        _sourceButton.Enabled = false;
         try
         {
             var progress = new Progress<string>(message =>
@@ -581,17 +565,13 @@ internal sealed class MainForm : Form
         finally
         {
             _syncInProgress = false;
-            SetBusy(false);
+            _syncButton.Enabled = true;
+            _sourceButton.Enabled = true;
         }
     }
 
     private async Task CheckForUpdatesAsync(bool showDialog)
     {
-        if (_busy)
-        {
-            return;
-        }
-
         _checkUpdatesButton.Enabled = false;
         try
         {
@@ -690,17 +670,6 @@ internal sealed class MainForm : Form
         });
     }
 
-    private void SetBusy(bool busy, string? status = null)
-    {
-        _busy = busy;
-        _syncButton.Enabled = !busy;
-        _sourceButton.Enabled = !busy;
-        if (!string.IsNullOrWhiteSpace(status))
-        {
-            SetStatus(status);
-        }
-    }
-
     private void SetStatus(string text)
     {
         _statusText.Text = text;
@@ -713,8 +682,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var line = $"{DateTime.Now:HH:mm:ss}  {text}";
-        _activityList.Items.Insert(0, line);
+        _activityList.Items.Insert(0, $"{DateTime.Now:HH:mm:ss}  {text}");
         while (_activityList.Items.Count > 80)
         {
             _activityList.Items.RemoveAt(_activityList.Items.Count - 1);
@@ -741,7 +709,6 @@ internal sealed class MainForm : Form
             Padding = new Padding(16),
             MinimumSize = new Size(250, 104),
         };
-
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -806,9 +773,7 @@ internal sealed class MainForm : Form
     private static string GetRunningVersion()
     {
         var assembly = typeof(MainForm).Assembly;
-        var informational = assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion;
+        var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(informational))
         {
             var buildMetadata = informational.IndexOf('+');
@@ -818,12 +783,7 @@ internal sealed class MainForm : Form
         return assembly.GetName().Version?.ToString(3) ?? "unknown";
     }
 
-    private static void TryEnableDarkTitleBar()
-    {
-        // No-op until a window handle is available; handled by the overload below.
-    }
-
-    private void TryEnableDarkTitleBarForHandle()
+    private void TryEnableDarkTitleBar()
     {
         try
         {
@@ -834,11 +794,6 @@ internal sealed class MainForm : Form
         {
             // Cosmetic only.
         }
-    }
-
-    private new void TryEnableDarkTitleBar()
-    {
-        TryEnableDarkTitleBarForHandle();
     }
 
     [DllImport("dwmapi.dll")]
