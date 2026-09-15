@@ -37,7 +37,6 @@ internal sealed class RosterSyncService
 
     public async Task<RosterSyncOutcome> SyncAsync(
         ClientSettings settings,
-        string bearerToken,
         string companionVersion,
         bool forceCurrentSnapshot,
         IProgress<string>? progress = null,
@@ -49,7 +48,7 @@ internal sealed class RosterSyncService
         }
 
         var grmFile = SourceLocator.GetGrmFilePath(settings.SourceSavedVariablesPath);
-        progress?.Report("Waiting for Guild_Roster_Manager.lua to finish saving…");
+        progress?.Report("Reading Guild_Roster_Manager.lua…");
         var parsed = await GrmRosterParser.ParseAsync(
             grmFile,
             settings.GuildName,
@@ -70,6 +69,40 @@ internal sealed class RosterSyncService
             QueuePayload(payload, currentOutboxPath);
         }
 
+        var queuedBeforeUpload = GetQueuedCount();
+        if (queuedBeforeUpload == 0)
+        {
+            return new RosterSyncOutcome(
+                parsed.Members.Count,
+                0,
+                0,
+                currentChanged,
+                parsed.CapturedAt,
+                $"Connected - no roster changes · {parsed.Members.Count:N0} active characters.");
+        }
+
+        string bearerToken;
+        try
+        {
+            progress?.Report("Connecting to Services01…");
+            var registration = await _apiClient.EnsureRegisteredAsync(
+                settings,
+                companionVersion,
+                cancellationToken);
+            bearerToken = registration.BearerToken;
+        }
+        catch (Exception ex) when (IsRetryable(ex, cancellationToken))
+        {
+            var queued = GetQueuedCount();
+            return new RosterSyncOutcome(
+                parsed.Members.Count,
+                0,
+                queued,
+                currentChanged,
+                parsed.CapturedAt,
+                $"Services01 unavailable; {queued:N0} validated snapshot(s) queued for retry. {ex.Message}");
+        }
+
         var uploaded = 0;
         string? deferredReason = null;
         foreach (var path in Directory.EnumerateFiles(AppPaths.OutboxRoot, "*.json")
@@ -82,11 +115,29 @@ internal sealed class RosterSyncService
 
             try
             {
-                var result = await _apiClient.UploadSnapshotAsync(
-                    settings.ServerBaseUrl,
-                    bearerToken,
-                    queuedPayload,
-                    cancellationToken);
+                UploadResult result;
+                try
+                {
+                    result = await _apiClient.UploadSnapshotAsync(
+                        settings.ServerBaseUrl,
+                        bearerToken,
+                        queuedPayload,
+                        cancellationToken);
+                }
+                catch (GuildRosterApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    GuildRosterApiClient.ClearRegistration(settings);
+                    var registration = await _apiClient.EnsureRegisteredAsync(
+                        settings,
+                        companionVersion,
+                        cancellationToken);
+                    bearerToken = registration.BearerToken;
+                    result = await _apiClient.UploadSnapshotAsync(
+                        settings.ServerBaseUrl,
+                        bearerToken,
+                        queuedPayload,
+                        cancellationToken);
+                }
 
                 if (!string.Equals(result.Status, "accepted", StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(result.Status, "duplicate", StringComparison.OrdinalIgnoreCase))
@@ -102,25 +153,9 @@ internal sealed class RosterSyncService
                 state.LastServerSnapshotId = result.SnapshotId;
                 SyncStateService.Save(state, _jsonOptions);
             }
-            catch (GuildRosterApiException ex) when (
-                ex.StatusCode is HttpStatusCode.RequestTimeout or
-                    HttpStatusCode.TooManyRequests or
-                    HttpStatusCode.InternalServerError or
-                    HttpStatusCode.BadGateway or
-                    HttpStatusCode.ServiceUnavailable or
-                    HttpStatusCode.GatewayTimeout)
+            catch (Exception ex) when (IsRetryable(ex, cancellationToken))
             {
                 deferredReason = ex.Message;
-                break;
-            }
-            catch (HttpRequestException ex)
-            {
-                deferredReason = ex.Message;
-                break;
-            }
-            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                deferredReason = "Services01 did not respond before the sync timeout.";
                 break;
             }
         }
@@ -145,7 +180,7 @@ internal sealed class RosterSyncService
                 queued,
                 false,
                 parsed.CapturedAt,
-                $"No roster changes · {parsed.Members.Count:N0} active characters · queue {queued:N0}.");
+                $"Connected - no roster changes · {parsed.Members.Count:N0} active characters · queue {queued:N0}.");
         }
 
         return new RosterSyncOutcome(
@@ -154,8 +189,22 @@ internal sealed class RosterSyncService
             queued,
             currentChanged,
             parsed.CapturedAt,
-            $"Roster sync complete · {parsed.Members.Count:N0} active characters · {uploaded:N0} upload(s) accepted · queue {queued:N0}.");
+            $"Connected - roster synchronized · {parsed.Members.Count:N0} active characters · queue {queued:N0}.");
     }
+
+    private static bool IsRetryable(Exception ex, CancellationToken cancellationToken) => ex switch
+    {
+        GuildRosterApiException apiEx when apiEx.StatusCode is
+            HttpStatusCode.RequestTimeout or
+            HttpStatusCode.TooManyRequests or
+            HttpStatusCode.InternalServerError or
+            HttpStatusCode.BadGateway or
+            HttpStatusCode.ServiceUnavailable or
+            HttpStatusCode.GatewayTimeout => true,
+        HttpRequestException => true,
+        TaskCanceledException when !cancellationToken.IsCancellationRequested => true,
+        _ => false,
+    };
 
     private string GetOutboxPath(string snapshotKey) =>
         Path.Combine(AppPaths.OutboxRoot, $"{snapshotKey}.json");
