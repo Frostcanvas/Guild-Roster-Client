@@ -1,6 +1,6 @@
 # Full GRM data capture scope
 
-Status: **Beta 6 implementation committed / validation pending**
+Status: **Beta 6 implementation committed; Windows build/installer validation and Services01 archive/bootstrap apply/recovery verification passed; immutable Beta 6 release pending.**
 
 Approved: 2026-09-14
 Implementation started: 2026-09-15
@@ -113,6 +113,6 @@ Blizzard/runtime facts such as class, race, level, online/last-online state, rep
 
 ## Release direction
 
-`0.1.0-beta.5` remains immutable. The implementation above is the Beta 6 source line. Do not publish `client-v0.1.0-beta.6` until the Windows build/installer workflow passes and the corresponding Services01 archive API has passed its isolated apply/verification. Existing release tags and installers are never overwritten.
+`0.1.0-beta.5` remains immutable. Current Beta 6 source head `21ada6ec5cba5b1861d9512afbe7e8acefea404d` passed GitHub Actions run `34933078224`: restore, self-contained Windows publish, executable verification, Inno Setup installer build, and artifact upload all passed. Services01 Beta 6 static validation, isolated archive/bootstrap apply, and the required single bootstrap recovery verification also passed. The next intentional release is `client-v0.1.0-beta.6`; existing release tags and installers must never be overwritten.
 
 No roster dump, secret, bearer token, registration key, Discord bot token, private key, password, or other protected value is committed to this repository.
