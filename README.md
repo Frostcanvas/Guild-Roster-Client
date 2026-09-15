@@ -2,7 +2,7 @@
 
 Windows client for the FrostLabs Hogwarts Academy guild roster system.
 
-This is a **standalone application**. It is separate from Azeroth Questing Companion: it has its own repository, executable, installer, install location, local settings, update channel, release history, and lifecycle. Its user experience intentionally follows the proven Azeroth Questing Companion pattern: detect the local WoW data source, keep a retry queue, register with Services01 automatically in the background, sync without asking the player for server credentials, and self-update.
+This is a **standalone application**. It is separate from Azeroth Questing Companion: it has its own repository, executable, installer, install location, local settings, update channel, release history, and lifecycle. Its user experience intentionally follows the proven Azeroth Questing Companion pattern: detect the local WoW data source, keep retry queues, register with Services01 automatically in the background, sync without asking the player for server credentials, and self-update.
 
 Public source and releases:
 
@@ -11,26 +11,40 @@ https://github.com/Frostcanvas/Guild-Roster-Client
 Default branch: main
 ```
 
-The client reads Guild Roster Manager (GRM) SavedVariables from World of Warcraft Retail, validates the configured guild roster, normalizes it into the FrostLabs `FGR1` protocol, and uploads complete snapshots to the LAN-only Guild Roster API on Services01.
+The client reads Guild Roster Manager (GRM) SavedVariables from World of Warcraft Retail, validates the configured guild roster, normalizes complete active-roster snapshots into the FrostLabs `FGR1` protocol, synchronizes GRM main/alt identity, and archives all safely parseable GRM structures to the LAN-only Guild Roster API on Services01.
 
 ## Current status
+
+`0.1.0-beta.6` is the current released prerelease.
 
 The standalone Windows client includes:
 
 - an AQ-style dark dashboard and navigation layout;
 - automatic GRM source selection when multiple WoW account folders exist;
-- GRM parsing and complete-snapshot validation;
+- safe GRM SavedVariables parsing and complete-snapshot validation;
+- FGR1 active-roster synchronization;
+- exact GRM main/alt identity synchronization;
+- full safely parseable GRM archive capture with a separate retry outbox;
+- current/former-member restore evidence keyed by complete Blizzard Player GUID;
+- returning-member recovery offers for exact-GUID `Inactive -> Active` rejoin events;
+- `Review & Restore`, `Keep Current`, and `Ask Later` recovery decisions;
 - automatic anonymous per-installation registration with Services01;
 - a Windows-DPAPI-protected bearer token created behind the scenes;
 - local retry/outbox handling;
-- SHA-256 roster deduplication;
+- SHA-256 roster/archive deduplication;
 - manual `Sync Now`;
 - automatic synchronization when GRM saves `Guild_Roster_Manager.lua`;
 - stable/beta self-update support.
 
 There is **no normal pairing-code step**. Like Azeroth Questing Companion, the client creates a random local client-instance ID, Services01 returns a unique per-installation bearer token, and the client stores that token locally without exposing a reusable server registration secret.
 
-The parser design was checked against the supplied Hogwarts Academy GRM SavedVariables structure. That source contains five recognized guild metadata fields plus 209 current member records; the current-member records carry the Blizzard GUID and character/realm data required by FGR1. No current member names or raw roster contents are committed to this repository.
+The Beta 6 archive preserves safely parsed current/former member structures, public/officer/custom-note evidence and note-change history, complete join-date history, read-only rank history, main/alt structures, birthdays, nicknames, leave-time identity evidence, GRM logs/events, settings, backup/restore structures, and future safely parseable fields. Unknown successfully parsed structures are retained rather than silently discarded.
+
+The returning-member restore workflow is intentionally narrow: only an exact historical complete Player GUID that transitions from Inactive to Active through an accepted complete roster snapshot may create an automatic recovery offer. Same-name/different-GUID records never auto-restore.
+
+The Beta 6 restore foundation records preview/selection/request state only. It does **not** write recovered values back into WoW or GRM automatically. Guild-rank restoration is explicitly prohibited.
+
+Manual Public/Officer note repair is intentionally deferred. A later client build will expose a passive `Review Notes (X)` workflow with an A-Z GUID-backed queue; synchronization will not be interrupted by note-repair prompts.
 
 ## Data source
 
@@ -68,9 +82,9 @@ Realm: BleedingHollow
 WOW_PROJECT_ID: 1 (Retail)
 ```
 
-The parser reads `GRM_GuildMemberHistory_Save` as structured Lua SavedVariables data and recognizes current GRM guild metadata separately from member entries. Each member must normalize to a valid Blizzard player GUID plus character/realm identity. Duplicate GUIDs, empty rosters, malformed tables, unstable/in-progress file writes, unsupported guild fields, or otherwise ambiguous parses are rejected before upload.
+The active-roster parser reads `GRM_GuildMemberHistory_Save` as structured Lua SavedVariables data and recognizes current GRM guild metadata separately from member entries. Each active member must normalize to a valid Blizzard player GUID plus character/realm identity. Duplicate GUIDs, empty rosters, malformed tables, unstable/in-progress file writes, unsupported current-roster guild fields, or otherwise ambiguous parses are rejected before a complete roster snapshot is uploaded.
 
-Current FGR1 fields include player GUID, character/realm, class, level, race, faction, rank, public/officer notes when available, and online/mobile state. Additional GRM-only history/main-alt fields remain available for later server-side expansion.
+FGR1 carries the validated active-roster identity/state needed for Active/Inactive semantics. Separate Beta 6 parsers also read `GRM_Alts` for main/alt identity and every detected top-level `GRM_*` SavedVariables assignment for the lossless archive/recovery layer.
 
 The client reads GRM SavedVariables as data only. It does not execute Lua, read WoW process memory, inject into the game, or automate gameplay.
 
@@ -83,6 +97,14 @@ Roster website:  http://10.0.10.246:8767/roster
 
 The API remains LAN-only.
 
+Beta 6 uses these authenticated server routes in addition to the existing roster/identity endpoints:
+
+```text
+POST /api/v1/grm/archive
+GET  /api/v1/roster/recovery-offers
+POST /api/v1/roster/recovery-offers/{offer_id}/decision
+```
+
 ## Automatic registration
 
 Normal onboarding mirrors Azeroth Questing Companion and requires no manual code:
@@ -92,7 +114,7 @@ Normal onboarding mirrors Azeroth Questing Companion and requires no manual code
 3. Services01 creates a unique installation ID and bearer token;
 4. Services01 stores only the token hash;
 5. the Windows client protects the returned token with DPAPI for the current Windows user;
-6. later uploads use that per-installation token automatically.
+6. later roster, identity, archive, and recovery requests use that per-installation token automatically.
 
 If the local protected token is lost while the old client-instance ID still exists server-side, the client creates a fresh instance ID and self-registers again, matching the AQ recovery behavior. The protected Services01 registration key is never embedded in the Windows client.
 
@@ -103,19 +125,23 @@ The older one-time pairing endpoints remain server-side only as an optional cont
 The client:
 
 1. waits for `Guild_Roster_Manager.lua` to become stable after WoW/GRM writes it;
-2. parses only the configured Hogwarts Academy current-roster table;
+2. parses and validates the configured Hogwarts Academy current-roster table;
 3. rejects incomplete, malformed, empty, duplicate-GUID, or ambiguous roster data;
-4. normalizes validated data to `FGR1`;
-5. computes a deterministic SHA-256 snapshot key so unchanged rosters are not repeatedly uploaded;
-6. writes a validated snapshot to the local outbox before network delivery;
-7. self-registers with Services01 if needed;
-8. uploads queued snapshots in order;
-9. removes an outbox item only after Services01 returns `accepted` or `duplicate`;
-10. retains validated snapshots for retry when Services01 is unavailable.
+4. normalizes validated active-roster data to `FGR1`;
+5. validates GRM main/alt identity against the complete active roster;
+6. parses the complete safe GRM archive and builds GUID-keyed restore profiles;
+7. computes deterministic SHA-256 keys so unchanged roster/archive state is not repeatedly uploaded;
+8. writes validated roster/archive payloads to independent local outboxes before network delivery;
+9. self-registers with Services01 if needed;
+10. uploads queued roster snapshots and GRM archives in order;
+11. synchronizes the complete main/alt identity map;
+12. checks for due exact-GUID returning-member recovery offers;
+13. removes outbox items only after Services01 returns an accepted/duplicate result;
+14. retains validated items for retry when Services01 is unavailable.
 
-`Sync Now` forces the current validated state to be queued/uploaded even when it matches the last accepted local snapshot. Automatic synchronization normally skips unchanged accepted roster state.
+`Sync Now` forces the current validated roster state to be queued/uploaded even when it matches the last accepted local snapshot. Automatic synchronization normally skips unchanged accepted state.
 
-Only server-accepted complete snapshots can drive Active/Inactive transitions. A client parse failure never sends a partial snapshot that could mark missing members inactive.
+Only server-accepted complete roster snapshots can drive Active/Inactive transitions. Archive or identity uploads cannot manufacture a partial roster or mark missing characters inactive.
 
 ## Automatic client updates
 
@@ -147,13 +173,27 @@ The updater:
 
 No GitHub PAT or reusable GitHub credential is embedded in the client.
 
-The existing Services01 `/api/v1/client-updates/...` path remains only as a compatibility/bootstrap bridge for already-installed Beta 1-3 clients while the Beta 4 transition is completed. It is not the normal update source for Beta 4 and later.
+The existing Services01 `/api/v1/client-updates/...` path remains only as a compatibility/bootstrap bridge for already-installed Beta 1-3 clients. It is not the normal update source for Beta 4 and later.
 
 ### Prerelease version discipline
 
-Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version. `0.1.0-beta.4` is the first direct-GitHub updater build; later functional test builds are `beta.5`, `beta.6`, and so on. Internal source/documentation commits may occur between releases without consuming a beta number.
+Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version. `0.1.0-beta.6` is immutable; the next functional client installer must use a later beta number. Internal source/documentation commits may occur between releases without consuming a beta number.
 
-The release workflow also refuses to overwrite an existing `client-v<version>` release tag; a new functional build must use a new version.
+The release workflow refuses to overwrite an existing `client-v<version>` release tag.
+
+### Beta 6 release evidence
+
+```text
+version: 0.1.0-beta.6
+tag: client-v0.1.0-beta.6
+release commit: f28879699f21b097ff1f708b87d9fc0ce472cb73
+GitHub Actions run: 34934087361
+installer: GuildRosterClient-Setup.exe
+installer size: 37294046 bytes
+SHA-256: 65f783cb58dd4ea11d4d501157f8b73902b0397ff01c97b334838cfad71bc9af
+```
+
+Windows restore, publish, executable verification, Inno Setup installer build, artifact upload, and GitHub prerelease publication all passed.
 
 ## Local client state
 
@@ -163,9 +203,10 @@ The release workflow also refuses to overwrite an existing `client-v<version>` r
 %LOCALAPPDATA%\FrostLabs\GuildRoster\sync-state.json
 %LOCALAPPDATA%\FrostLabs\GuildRoster\Updates
 %LOCALAPPDATA%\FrostLabs\GuildRoster\Outbox
+%LOCALAPPDATA%\FrostLabs\GuildRoster\GrmArchiveOutbox
 ```
 
-`auth.bin` contains only the Windows-DPAPI-protected per-installation bearer token. The outbox is retry state only. Canonical roster/history remains PostgreSQL on Services01.
+`auth.bin` contains only the Windows-DPAPI-protected per-installation bearer token. The outboxes are retry state only. Canonical roster/history/archive/recovery state remains PostgreSQL on Services01 after successful upload.
 
 ## Build
 
@@ -179,5 +220,8 @@ GitHub Actions builds `GuildRosterClient-Setup.exe` with Inno Setup on each push
 - Automatic registration is LAN-only and returns a unique per-installation bearer token; the reusable protected registration key stays server-side.
 - Only complete validated Hogwarts Academy roster snapshots may be uploaded as complete `FGR1` snapshots.
 - A partial or ambiguous GRM parse must fail closed so it cannot incorrectly mark members inactive.
-- GRM schema changes must surface as parser errors rather than silently changing roster meaning.
+- GRM schema changes must surface as parser errors or safely archived unknown structures rather than silently changing roster meaning.
+- Returning-member automatic recovery requires an exact historical complete Player GUID plus canonical `Inactive -> Active` rejoin evidence.
+- Same-name/different-GUID identities require manual review.
+- Guild-rank restoration and automated promote/demote/kick/ban actions are prohibited.
 - The client never executes imported Lua and never reads WoW process memory.
