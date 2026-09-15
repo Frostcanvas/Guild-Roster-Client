@@ -12,11 +12,13 @@ internal static class AppPaths
     public static string SyncStatePath => Path.Combine(Root, "sync-state.json");
     public static string UpdatesRoot => Path.Combine(Root, "Updates");
     public static string OutboxRoot => Path.Combine(Root, "Outbox");
+    public static string GrmArchiveOutboxRoot => Path.Combine(Root, "GrmArchiveOutbox");
 
     public static void EnsureCreated()
     {
         Directory.CreateDirectory(Root);
         Directory.CreateDirectory(UpdatesRoot);
         Directory.CreateDirectory(OutboxRoot);
+        Directory.CreateDirectory(GrmArchiveOutboxRoot);
     }
 }
