@@ -53,6 +53,20 @@ Explicit operator-approved restore may be implemented for:
 
 Every restore must preview current versus recovered values and preserve the pre-restore state first.
 
+## Returning-member recovery trigger
+
+A restore offer is specifically triggered by a validated **Inactive -> Active** transition for an already-known character identity.
+
+- Services01 compares each accepted complete roster snapshot with canonical roster state.
+- If an exact historical Blizzard player GUID that was inactive becomes active again, the existing character identity is reactivated rather than duplicated.
+- The Windows client creates one pending recovery offer for that reactivation event with **Review & Restore**, **Keep Current**, and **Ask Later** choices.
+- **Review & Restore** shows current values beside archived values and allows only the approved restore fields to be selected.
+- **Keep Current** records that the offer was dismissed for that reactivation event; **Ask Later** keeps the offer pending.
+- The client must not repeat the same prompt on every synchronization.
+- Existing history is merged rather than overwritten. Join/rejoin history must preserve the earlier join period, leave event when known, and the new rejoin event.
+- Character name and realm are not sufficient identity keys. A same-name record with a different player GUID must never receive automatic historical restore; it requires manual review.
+- Before any write-back, preserve the current pre-restore state and log the restored, skipped, or rejected fields.
+
 **Do not implement rank restoration.** Rank names/history are read-only historical data. The client must not automate promotion, demotion, kick, ban, or other guild-management actions from archived GRM state.
 
 Blizzard/runtime facts such as class, race, level, online/last-online state, reputation, achievements, professions, and similar fields are archive/display data and are not written back.
