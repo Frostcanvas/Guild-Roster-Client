@@ -63,3 +63,9 @@ The note-cleanup queue remains passive and separate from ordinary sync. This res
 - SHA-256: `a6ddff9518d38127ee7e684c260f33238a4865fa9a27d12b30b4ddd934af29ec`
 
 Beta 7 is immutable. A later functional client installer must use a later beta number.
+
+## User-live verification
+
+The released `0.1.0-beta.7` installer was installed on the development Windows client and verified live on 2026-09-15. After restart the client reported version `0.1.0-beta.7`, Services01 connected, 209 active Hogwarts Academy characters, queue 0, and the client reported itself up to date. The post-update sync continued to parse 13 GRM variables, build 247 restore-profile records, report 0 unsupported variables, and validate the 134-main / 41-alt / 34-ungrouped identity split.
+
+This verifies the Beta 7 client update and normal sync path. It does not manufacture a leave/rejoin event; actual restore write-back will be exercised only when a genuine exact-GUID recovery event exists.
