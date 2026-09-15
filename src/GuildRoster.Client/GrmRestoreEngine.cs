@@ -78,7 +78,8 @@ internal static class GrmRestoreEngine
 
         if (!SourceLocator.IsValidSavedVariablesDirectory(settings.SourceSavedVariablesPath))
         {
-            throw new InvalidOperationException("The configured GRM SavedVariables source is unavailable. Select the GRM source before restoring archived data.");
+            throw new InvalidOperationException(
+                "The configured GRM SavedVariables source is unavailable. Select the GRM source before restoring archived data.");
         }
 
         var grmFile = SourceLocator.GetGrmFilePath(settings.SourceSavedVariablesPath!);
@@ -119,7 +120,8 @@ internal static class GrmRestoreEngine
         var fullName = member.GetString("name") ?? memberKey;
         if (string.IsNullOrWhiteSpace(fullName))
         {
-            throw new InvalidDataException("The returning character record did not contain a usable current character name.");
+            throw new InvalidDataException(
+                "The returning character record did not contain a usable current character name.");
         }
 
         var archivedAltGroup = GetArchivedString(offer.ArchivedValues, "alt_group");
@@ -147,7 +149,7 @@ internal static class GrmRestoreEngine
             }
             catch (InvalidDataException)
             {
-                // Member-level fields can still be restored. Relationship/group fields will be marked for review.
+                // Member-level fields can still be restored. Relationship/group fields fail closed to review.
             }
         }
 
@@ -161,7 +163,10 @@ internal static class GrmRestoreEngine
 
             if (!KnownFields.Contains(field))
             {
-                fieldResults.Add(Result(field, "needs_review", "The selected field is not in the approved restore allowlist."));
+                fieldResults.Add(Result(
+                    field,
+                    "needs_review",
+                    "The selected field is not in the approved restore allowlist."));
                 continue;
             }
 
@@ -189,30 +194,47 @@ internal static class GrmRestoreEngine
                 {
                     member.SetField("customNote", customNote);
                     memberChanged = true;
-                    fieldResults.Add(Result(field, "restored", "GRM custom-note state restored from the archived GUID profile."));
+                    fieldResults.Add(Result(
+                        field,
+                        "restored",
+                        "GRM custom-note state restored from the archived GUID profile."));
                 }
                 else
                 {
-                    fieldResults.Add(Result(field, "needs_review", "No archived GRM custom-note table was available."));
+                    fieldResults.Add(Result(
+                        field,
+                        "needs_review",
+                        "No archived GRM custom-note table was available."));
                 }
                 continue;
             }
 
             if (string.Equals(field, "join_date_history", StringComparison.OrdinalIgnoreCase))
             {
-                if (TryGetArchivedLuaTable(offer.ArchivedValues, "join_date_history", out var joinHistory))
+                if (TryGetArchivedLuaTable(offer.ArchivedValues, "join_date_history", out var archivedJoinHistory))
                 {
-                    member.SetField("joinDateHist", joinHistory);
-                    if (TryGetArchivedBool(offer.ArchivedValues, "join_date_unknown", out var joinDateUnknown))
+                    MergeJoinDateHistory(member, archivedJoinHistory);
+                    if (TryGetArchivedBool(
+                            offer.ArchivedValues,
+                            "join_date_unknown",
+                            out var archivedJoinDateUnknown) &&
+                        !archivedJoinDateUnknown)
                     {
-                        member.SetField("joinDateUnknown", joinDateUnknown);
+                        // Never downgrade a currently known history back to unknown.
+                        member.SetField("joinDateUnknown", false);
                     }
                     memberChanged = true;
-                    fieldResults.Add(Result(field, "restored", "Complete GRM join-date history restored without changing guild rank."));
+                    fieldResults.Add(Result(
+                        field,
+                        "restored",
+                        "Archived GRM join history was merged with the current history so the new rejoin evidence is preserved."));
                 }
                 else
                 {
-                    fieldResults.Add(Result(field, "needs_review", "No archived GRM join-date history was available."));
+                    fieldResults.Add(Result(
+                        field,
+                        "needs_review",
+                        "No archived GRM join-date history was available."));
                 }
                 continue;
             }
@@ -243,7 +265,10 @@ internal static class GrmRestoreEngine
                     restored = true;
                 }
                 if (targetGroup is not null &&
-                    TryGetArchivedLuaTable(offer.ArchivedValues, "alt_group_birthday_info", out var groupBirthday))
+                    TryGetArchivedLuaTable(
+                        offer.ArchivedValues,
+                        "alt_group_birthday_info",
+                        out var groupBirthday))
                 {
                     targetGroup.SetField("birthdayInfo", groupBirthday);
                     targetGroup.SetField("timeModified", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
@@ -251,22 +276,34 @@ internal static class GrmRestoreEngine
                     restored = true;
                 }
                 fieldResults.Add(restored
-                    ? Result(field, "restored", "GRM birthday data restored from archived member/group evidence.")
-                    : Result(field, "needs_review", "No archived birthday structure was available for safe restore."));
+                    ? Result(
+                        field,
+                        "restored",
+                        "GRM birthday data restored from archived member/group evidence.")
+                    : Result(
+                        field,
+                        "needs_review",
+                        "No archived birthday structure was available for safe restore."));
                 continue;
             }
 
             if (string.Equals(field, "nickname", StringComparison.OrdinalIgnoreCase))
             {
                 var restored = false;
-                if (TryGetArchivedLuaTable(offer.ArchivedValues, "nickname_details", out var nicknameDetails))
+                if (TryGetArchivedLuaTable(
+                        offer.ArchivedValues,
+                        "nickname_details",
+                        out var nicknameDetails))
                 {
                     member.SetField("nicknameDetails", nicknameDetails);
                     memberChanged = true;
                     restored = true;
                 }
                 if (targetGroup is not null &&
-                    TryGetArchivedLuaTable(offer.ArchivedValues, "alt_group_nickname_details", out var groupNickname))
+                    TryGetArchivedLuaTable(
+                        offer.ArchivedValues,
+                        "alt_group_nickname_details",
+                        out var groupNickname))
                 {
                     targetGroup.SetField("nicknameDetails", groupNickname);
                     targetGroup.SetField("timeModified", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
@@ -274,8 +311,14 @@ internal static class GrmRestoreEngine
                     restored = true;
                 }
                 fieldResults.Add(restored
-                    ? Result(field, "restored", "GRM nickname data restored from archived member/group evidence.")
-                    : Result(field, "needs_review", "No archived nickname structure was available for safe restore."));
+                    ? Result(
+                        field,
+                        "restored",
+                        "GRM nickname data restored from archived member/group evidence.")
+                    : Result(
+                        field,
+                        "needs_review",
+                        "No archived nickname structure was available for safe restore."));
             }
         }
 
@@ -290,19 +333,29 @@ internal static class GrmRestoreEngine
                 var currentRootSpan = FindAssignmentTableSpan(originalText, CurrentMembersVariable);
                 var currentGuildSpan = FindDirectChildTableSpan(originalText, currentRootSpan, guildKey);
                 var memberSpan = FindDirectChildTableSpan(originalText, currentGuildSpan, memberKey);
-                replacements.Add(new TextReplacement(memberSpan.OpenBraceIndex, memberSpan.Length, SerializeLuaTable(member)));
+                replacements.Add(new TextReplacement(
+                    memberSpan.OpenBraceIndex,
+                    memberSpan.Length,
+                    SerializeLuaTable(member)));
             }
 
             if (groupChanged)
             {
-                if (altRoot is null || guildGroups is null || targetGroup is null || string.IsNullOrWhiteSpace(archivedAltGroup))
+                if (altRoot is null ||
+                    guildGroups is null ||
+                    targetGroup is null ||
+                    string.IsNullOrWhiteSpace(archivedAltGroup))
                 {
-                    throw new InvalidDataException("A GRM alt-group change was prepared without a valid current alt-group table.");
+                    throw new InvalidDataException(
+                        "A GRM alt-group change was prepared without a valid current alt-group table.");
                 }
                 var altRootSpan = FindAssignmentTableSpan(originalText, AltGroupsVariable);
                 var altGuildSpan = FindDirectChildTableSpan(originalText, altRootSpan, guildKey);
                 var groupSpan = FindDirectChildTableSpan(originalText, altGuildSpan, archivedAltGroup!);
-                replacements.Add(new TextReplacement(groupSpan.OpenBraceIndex, groupSpan.Length, SerializeLuaTable(targetGroup)));
+                replacements.Add(new TextReplacement(
+                    groupSpan.OpenBraceIndex,
+                    groupSpan.Length,
+                    SerializeLuaTable(targetGroup)));
             }
 
             foreach (var replacement in replacements.OrderByDescending(item => item.Start))
@@ -311,17 +364,33 @@ internal static class GrmRestoreEngine
                     .Insert(replacement.Start, replacement.Replacement);
             }
 
+            // Fail closed if our emitted SavedVariables cannot be read back by the safe parser.
             _ = LuaSavedVariablesParser.ParseAssignment(updatedText, CurrentMembersVariable);
             if (groupChanged)
             {
                 _ = LuaSavedVariablesParser.ParseAssignment(updatedText, AltGroupsVariable);
             }
 
+            // Abort if something external changed the live file after our original read.
+            var liveBeforeWrite = await File.ReadAllTextAsync(grmFile, cancellationToken);
+            if (!string.Equals(
+                    Sha256(liveBeforeWrite),
+                    sourceHashBefore,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Guild_Roster_Manager.lua changed while the restore was being prepared. No restore was written; review the latest GRM data and try again.");
+            }
+
             backupDirectory = CreateBackup(grmFile, offer.Id);
             var tempPath = grmFile + ".frostlabs-restore.tmp";
             try
             {
-                await File.WriteAllTextAsync(tempPath, updatedText, new UTF8Encoding(false), cancellationToken);
+                await File.WriteAllTextAsync(
+                    tempPath,
+                    updatedText,
+                    new UTF8Encoding(false),
+                    cancellationToken);
                 File.Move(tempPath, grmFile, true);
             }
             catch
@@ -332,7 +401,9 @@ internal static class GrmRestoreEngine
                 }
                 if (!File.Exists(grmFile) && backupDirectory is not null)
                 {
-                    var backupFile = Path.Combine(backupDirectory, Path.GetFileName(grmFile));
+                    var backupFile = Path.Combine(
+                        backupDirectory,
+                        Path.GetFileName(grmFile));
                     if (File.Exists(backupFile))
                     {
                         File.Copy(backupFile, grmFile, true);
@@ -359,6 +430,60 @@ internal static class GrmRestoreEngine
         return result;
     }
 
+    private static void MergeJoinDateHistory(LuaTable member, LuaTable archivedHistory)
+    {
+        if (!member.TryGetTable("joinDateHist", out var currentHistory))
+        {
+            member.SetField("joinDateHist", archivedHistory);
+            return;
+        }
+
+        // Archived events are older evidence; keep their source order first, then append
+        // any current-only events (including the latest rejoin) without duplication.
+        var merged = new LuaTable();
+        var fingerprints = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var value in archivedHistory.Values)
+        {
+            AddUniqueHistoryValue(merged, fingerprints, value);
+        }
+        foreach (var value in currentHistory.Values)
+        {
+            AddUniqueHistoryValue(merged, fingerprints, value);
+        }
+
+        foreach (var field in archivedHistory.Fields)
+        {
+            merged.SetField(field.Key, field.Value);
+        }
+        foreach (var field in currentHistory.Fields)
+        {
+            // Current GRM state wins for keyed metadata while positional event history is merged.
+            merged.SetField(field.Key, field.Value);
+        }
+
+        member.SetField("joinDateHist", merged);
+    }
+
+    private static void AddUniqueHistoryValue(
+        LuaTable destination,
+        ISet<string> fingerprints,
+        object? value)
+    {
+        var fingerprint = SerializeLuaValueToString(value);
+        if (fingerprints.Add(fingerprint))
+        {
+            destination.AddValue(value);
+        }
+    }
+
+    private static string SerializeLuaValueToString(object? value)
+    {
+        var builder = new StringBuilder();
+        SerializeLuaValue(builder, value, 0);
+        return builder.ToString();
+    }
+
     private static GrmRestoreFieldResult RestoreMainAltRelationship(
         LuaTable member,
         LuaTable? targetGroup,
@@ -377,36 +502,54 @@ internal static class GrmRestoreEngine
             string.IsNullOrWhiteSpace(relationship) ||
             string.IsNullOrWhiteSpace(archivedMain))
         {
-            return Result("main_alt_relationship", "needs_review", "Archived main/alt evidence was incomplete; no relationship was guessed.");
+            return Result(
+                "main_alt_relationship",
+                "needs_review",
+                "Archived main/alt evidence was incomplete; no relationship was guessed.");
         }
         if (targetGroup is null)
         {
-            return Result("main_alt_relationship", "needs_review", "The archived alt group no longer exists in current GRM data; FrostLabs did not recreate it automatically.");
+            return Result(
+                "main_alt_relationship",
+                "needs_review",
+                "The archived alt group no longer exists in current GRM data; FrostLabs did not recreate it automatically.");
         }
 
         var currentAltGroup = member.GetString("altGroup");
         if (!string.IsNullOrWhiteSpace(currentAltGroup) &&
             !string.Equals(currentAltGroup, archivedAltGroup, StringComparison.Ordinal))
         {
-            return Result("main_alt_relationship", "needs_review", $"Current GRM alt group '{currentAltGroup}' conflicts with archived group '{archivedAltGroup}'.");
+            return Result(
+                "main_alt_relationship",
+                "needs_review",
+                $"Current GRM alt group '{currentAltGroup}' conflicts with archived group '{archivedAltGroup}'.");
         }
 
         var currentMain = targetGroup.GetString("main");
         if (!string.IsNullOrWhiteSpace(currentMain) &&
             !string.Equals(currentMain, archivedMain, StringComparison.OrdinalIgnoreCase))
         {
-            return Result("main_alt_relationship", "needs_review", $"Current GRM group main '{currentMain}' conflicts with archived main '{archivedMain}'.");
+            return Result(
+                "main_alt_relationship",
+                "needs_review",
+                $"Current GRM group main '{currentMain}' conflicts with archived main '{archivedMain}'.");
         }
 
         if (string.Equals(relationship, "main", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(fullName, archivedMain, StringComparison.OrdinalIgnoreCase))
         {
-            return Result("main_alt_relationship", "needs_review", "Archived relationship says Main, but the archived main name does not match this character.");
+            return Result(
+                "main_alt_relationship",
+                "needs_review",
+                "Archived relationship says Main, but the archived main name does not match this character.");
         }
         if (string.Equals(relationship, "alt", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(fullName, archivedMain, StringComparison.OrdinalIgnoreCase))
         {
-            return Result("main_alt_relationship", "needs_review", "Archived relationship says Alt, but the archived main name is this same character.");
+            return Result(
+                "main_alt_relationship",
+                "needs_review",
+                "Archived relationship says Alt, but the archived main name is this same character.");
         }
 
         member.SetField("altGroup", archivedAltGroup);
@@ -420,7 +563,10 @@ internal static class GrmRestoreEngine
 
         var memberAlreadyPresent = targetGroup.Values
             .OfType<LuaTable>()
-            .Any(entry => string.Equals(entry.GetString("name"), fullName, StringComparison.OrdinalIgnoreCase));
+            .Any(entry => string.Equals(
+                entry.GetString("name"),
+                fullName,
+                StringComparison.OrdinalIgnoreCase));
         if (!memberAlreadyPresent)
         {
             var groupMember = new LuaTable();
@@ -439,23 +585,35 @@ internal static class GrmRestoreEngine
             targetGroup.SetField("timeModified", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         }
 
-        return Result("main_alt_relationship", "restored", $"GRM relationship restored to group {archivedAltGroup} with main {archivedMain}.");
+        return Result(
+            "main_alt_relationship",
+            "restored",
+            $"GRM relationship restored to group {archivedAltGroup} with main {archivedMain}.");
     }
 
-    private static (string Key, LuaTable Member) FindCurrentMemberByGuid(LuaTable currentGuild, string playerGuid)
+    private static (string Key, LuaTable Member) FindCurrentMemberByGuid(
+        LuaTable currentGuild,
+        string playerGuid)
     {
         foreach (var field in currentGuild.Fields)
         {
             if (field.Value is LuaTable member &&
-                string.Equals(member.GetString("GUID"), playerGuid, StringComparison.OrdinalIgnoreCase))
+                string.Equals(
+                    member.GetString("GUID"),
+                    playerGuid,
+                    StringComparison.OrdinalIgnoreCase))
             {
                 return (field.Key, member);
             }
         }
-        throw new InvalidDataException($"The current Hogwarts Academy GRM roster does not contain exact Player GUID '{playerGuid}'. No restore was applied.");
+        throw new InvalidDataException(
+            $"The current Hogwarts Academy GRM roster does not contain exact Player GUID '{playerGuid}'. No restore was applied.");
     }
 
-    private static bool TryGetArchivedLuaTable(JsonElement archived, string propertyName, out LuaTable table)
+    private static bool TryGetArchivedLuaTable(
+        JsonElement archived,
+        string propertyName,
+        out LuaTable table)
     {
         table = null!;
         if (archived.ValueKind != JsonValueKind.Object ||
@@ -480,14 +638,16 @@ internal static class GrmRestoreEngine
             case JsonValueKind.Object:
             {
                 var table = new LuaTable();
-                if (element.TryGetProperty("$values", out var values) && values.ValueKind == JsonValueKind.Array)
+                if (element.TryGetProperty("$values", out var values) &&
+                    values.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var value in values.EnumerateArray())
                     {
                         table.AddValue(ConvertJsonValue(value));
                     }
                 }
-                if (element.TryGetProperty("$fields", out var fields) && fields.ValueKind == JsonValueKind.Object)
+                if (element.TryGetProperty("$fields", out var fields) &&
+                    fields.ValueKind == JsonValueKind.Object)
                 {
                     foreach (var property in fields.EnumerateObject())
                     {
@@ -531,13 +691,15 @@ internal static class GrmRestoreEngine
             case JsonValueKind.Undefined:
                 return null;
             default:
-                throw new InvalidDataException($"Unsupported archived JSON value kind '{element.ValueKind}'.");
+                throw new InvalidDataException(
+                    $"Unsupported archived JSON value kind '{element.ValueKind}'.");
         }
     }
 
     private static string? GetArchivedString(JsonElement archived, string name)
     {
-        if (archived.ValueKind != JsonValueKind.Object || !archived.TryGetProperty(name, out var value))
+        if (archived.ValueKind != JsonValueKind.Object ||
+            !archived.TryGetProperty(name, out var value))
         {
             return null;
         }
@@ -555,7 +717,8 @@ internal static class GrmRestoreEngine
     private static bool TryGetArchivedBool(JsonElement archived, string name, out bool value)
     {
         value = false;
-        if (archived.ValueKind != JsonValueKind.Object || !archived.TryGetProperty(name, out var element))
+        if (archived.ValueKind != JsonValueKind.Object ||
+            !archived.TryGetProperty(name, out var element))
         {
             return false;
         }
@@ -577,12 +740,18 @@ internal static class GrmRestoreEngine
             AppPaths.GrmRestoreBackupRoot,
             $"{DateTime.Now:yyyyMMdd-HHmmssfff}-offer-{offerId}");
         Directory.CreateDirectory(directory);
-        File.Copy(grmFile, Path.Combine(directory, Path.GetFileName(grmFile)), false);
+        File.Copy(
+            grmFile,
+            Path.Combine(directory, Path.GetFileName(grmFile)),
+            false);
 
         var siblingBak = grmFile + ".bak";
         if (File.Exists(siblingBak))
         {
-            File.Copy(siblingBak, Path.Combine(directory, Path.GetFileName(siblingBak)), false);
+            File.Copy(
+                siblingBak,
+                Path.Combine(directory, Path.GetFileName(siblingBak)),
+                false);
         }
         return directory;
     }
@@ -597,7 +766,9 @@ internal static class GrmRestoreEngine
         File.Move(temp, path, true);
     }
 
-    private static GrmRestoreExecutionResult? TryLoadCompletedAudit(long offerId, string playerGuid)
+    private static GrmRestoreExecutionResult? TryLoadCompletedAudit(
+        long offerId,
+        string playerGuid)
     {
         var path = GetAuditPath(offerId);
         if (!File.Exists(path))
@@ -606,9 +777,15 @@ internal static class GrmRestoreEngine
         }
         try
         {
-            var audit = JsonSerializer.Deserialize<GrmRestoreExecutionResult>(File.ReadAllText(path), AuditJsonOptions);
-            if (audit is null || !audit.Completed ||
-                !string.Equals(audit.PlayerGuid, playerGuid, StringComparison.OrdinalIgnoreCase))
+            var audit = JsonSerializer.Deserialize<GrmRestoreExecutionResult>(
+                File.ReadAllText(path),
+                AuditJsonOptions);
+            if (audit is null ||
+                !audit.Completed ||
+                !string.Equals(
+                    audit.PlayerGuid,
+                    playerGuid,
+                    StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
@@ -657,14 +834,21 @@ internal static class GrmRestoreEngine
     private static string Sha256(string text) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 
-    private static GrmRestoreFieldResult Result(string field, string status, string message) => new()
+    private static GrmRestoreFieldResult Result(
+        string field,
+        string status,
+        string message) => new()
     {
         Field = field,
         Status = status,
         Message = message,
     };
 
-    private readonly record struct TextReplacement(int Start, int Length, string Replacement);
+    private readonly record struct TextReplacement(
+        int Start,
+        int Length,
+        string Replacement);
+
     private readonly record struct TableSpan(int OpenBraceIndex, int CloseBraceIndex)
     {
         public int Length => CloseBraceIndex - OpenBraceIndex + 1;
@@ -678,18 +862,23 @@ internal static class GrmRestoreEngine
             RegexOptions.CultureInvariant);
         if (!match.Success)
         {
-            throw new InvalidDataException($"SavedVariables assignment '{variableName}' was not found while preparing restore write-back.");
+            throw new InvalidDataException(
+                $"SavedVariables assignment '{variableName}' was not found while preparing restore write-back.");
         }
 
         var open = SkipWhitespace(text, match.Index + match.Length);
         if (open >= text.Length || text[open] != '{')
         {
-            throw new InvalidDataException($"SavedVariables assignment '{variableName}' did not start with a Lua table.");
+            throw new InvalidDataException(
+                $"SavedVariables assignment '{variableName}' did not start with a Lua table.");
         }
         return new TableSpan(open, FindMatchingBrace(text, open));
     }
 
-    private static TableSpan FindDirectChildTableSpan(string text, TableSpan parent, string wantedKey)
+    private static TableSpan FindDirectChildTableSpan(
+        string text,
+        TableSpan parent,
+        string wantedKey)
     {
         var depth = 0;
         var index = parent.OpenBraceIndex + 1;
@@ -701,7 +890,9 @@ internal static class GrmRestoreEngine
                 index = SkipString(text, index);
                 continue;
             }
-            if (current == '-' && index + 1 < parent.CloseBraceIndex && text[index + 1] == '-')
+            if (current == '-' &&
+                index + 1 < parent.CloseBraceIndex &&
+                text[index + 1] == '-')
             {
                 index = SkipComment(text, index);
                 continue;
@@ -722,13 +913,20 @@ internal static class GrmRestoreEngine
                 continue;
             }
 
-            if (depth == 0 && current == '[' && TryReadBracketStringKey(text, index, out var key, out var afterKey))
+            if (depth == 0 &&
+                current == '[' &&
+                TryReadBracketStringKey(
+                    text,
+                    index,
+                    out var key,
+                    out var afterKey))
             {
                 var cursor = SkipWhitespace(text, afterKey);
                 if (cursor < parent.CloseBraceIndex && text[cursor] == '=')
                 {
                     cursor = SkipWhitespace(text, cursor + 1);
-                    if (cursor < parent.CloseBraceIndex && text[cursor] == '{' &&
+                    if (cursor < parent.CloseBraceIndex &&
+                        text[cursor] == '{' &&
                         string.Equals(key, wantedKey, StringComparison.Ordinal))
                     {
                         return new TableSpan(cursor, FindMatchingBrace(text, cursor));
@@ -740,14 +938,21 @@ internal static class GrmRestoreEngine
             index++;
         }
 
-        throw new InvalidDataException($"GRM table key '{wantedKey}' was not found at the expected SavedVariables level.");
+        throw new InvalidDataException(
+            $"GRM table key '{wantedKey}' was not found at the expected SavedVariables level.");
     }
 
-    private static bool TryReadBracketStringKey(string text, int start, out string key, out int afterKey)
+    private static bool TryReadBracketStringKey(
+        string text,
+        int start,
+        out string key,
+        out int afterKey)
     {
         key = string.Empty;
         afterKey = start + 1;
-        if (start + 3 >= text.Length || text[start] != '[' || text[start + 1] is not ('"' or '\''))
+        if (start + 3 >= text.Length ||
+            text[start] != '[' ||
+            text[start + 1] is not ('"' or '\''))
         {
             return false;
         }
@@ -799,7 +1004,9 @@ internal static class GrmRestoreEngine
                 index = SkipString(text, index);
                 continue;
             }
-            if (current == '-' && index + 1 < text.Length && text[index + 1] == '-')
+            if (current == '-' &&
+                index + 1 < text.Length &&
+                text[index + 1] == '-')
             {
                 index = SkipComment(text, index);
                 continue;
@@ -818,7 +1025,8 @@ internal static class GrmRestoreEngine
             }
             index++;
         }
-        throw new InvalidDataException("Unbalanced Lua table braces were found while preparing restore write-back.");
+        throw new InvalidDataException(
+            "Unbalanced Lua table braces were found while preparing restore write-back.");
     }
 
     private static int SkipString(string text, int start)
@@ -844,7 +1052,9 @@ internal static class GrmRestoreEngine
     private static int SkipComment(string text, int start)
     {
         var index = start + 2;
-        if (index + 1 < text.Length && text[index] == '[' && text[index + 1] == '[')
+        if (index + 1 < text.Length &&
+            text[index] == '[' &&
+            text[index + 1] == '[')
         {
             var end = text.IndexOf("]]", index + 2, StringComparison.Ordinal);
             return end >= 0 ? end + 2 : text.Length;
@@ -901,7 +1111,8 @@ internal static class GrmRestoreEngine
                 SerializeTable(builder, table, indent);
                 return;
             default:
-                throw new InvalidDataException($"Unsupported Lua value type '{value.GetType().FullName}' while serializing restore data.");
+                throw new InvalidDataException(
+                    $"Unsupported Lua value type '{value.GetType().FullName}' while serializing restore data.");
         }
     }
 
@@ -924,7 +1135,9 @@ internal static class GrmRestoreEngine
         foreach (var field in table.Fields)
         {
             AppendIndent(builder, indent + 1);
-            builder.Append("[\"").Append(EscapeLuaString(field.Key)).Append("\"] = ");
+            builder.Append("[\"")
+                .Append(EscapeLuaString(field.Key))
+                .Append("\"] = ");
             SerializeLuaValue(builder, field.Value, indent + 1);
             builder.Append(',').AppendLine();
         }
