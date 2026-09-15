@@ -27,6 +27,7 @@ internal static partial class GrmArchiveParser
         var text = await ReadMatchingStableFileAsync(filePath, roster.CapturedAt, cancellationToken);
         var variableNames = AssignmentRegex()
             .Matches(text)
+            .Cast<Match>()
             .Select(match => match.Groups[1].Value)
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.Ordinal)
@@ -81,9 +82,12 @@ internal static partial class GrmArchiveParser
         IReadOnlyDictionary<string, LuaTable> parsedRoots,
         string guildKey)
     {
-        parsedRoots.TryGetValue(AltGroupsVariable, out var altRoot);
         LuaTable? guildGroups = null;
-        altRoot?.TryGetTable(guildKey, out guildGroups!);
+        if (parsedRoots.TryGetValue(AltGroupsVariable, out var altRoot) &&
+            altRoot.TryGetTable(guildKey, out var foundGroups))
+        {
+            guildGroups = foundGroups;
+        }
 
         var profiles = new List<GrmRestoreProfilePayload>();
 
