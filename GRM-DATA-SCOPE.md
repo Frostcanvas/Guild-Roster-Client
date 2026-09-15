@@ -64,6 +64,17 @@ The committed Beta 6 foundation implements **detection, preview, field selection
 
 Retail note-writing restrictions mean the client must treat Public/Officer note repair as a guided operator workflow rather than automatic write-back. The helper will build a resumable queue from the latest validated Hogwarts Academy GRM/archive state and present the exact values to enter through Blizzard's guild UI.
 
+The note-repair workflow is intentionally **deferred and passive** while the rest of Beta 6 is being completed. The client must not interrupt synchronization with note-repair prompts or automatically open the repair workflow. Instead, the dashboard/top bar will expose a button labeled **`Review Notes (X)`**, where `X` is the number of unresolved manual guild-note repair items. The count may accumulate while other Guild Roster work continues; the queue opens only when the operator clicks the button.
+
+`Review Notes (X)` count rules:
+
+- include pending and **Needs Review** repair items;
+- exclude already-correct entries;
+- exclude items already marked **Done**;
+- exclude items intentionally marked **Skip** for the current repair plan;
+- refresh after a successful GRM parse/sync or when a review decision changes;
+- never treat the count itself as approval to change a Blizzard guild note.
+
 Queue behavior:
 
 - active characters are ordered **A-Z by character name**, case-insensitive; realm is the deterministic tie-breaker;
