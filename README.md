@@ -124,6 +124,10 @@ Its update experience mirrors the Azeroth Questing Companion:
 - use silent Inno Setup close/replace/restart behavior;
 - clean stale update caches after seven days.
 
+### Prerelease version discipline
+
+Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version. Current progression is `0.1.0-beta.3`; the next functional test build is `0.1.0-beta.4`, then `beta.5`, `beta.6`, and so on. Internal source/documentation commits may occur between releases without consuming a beta number. This prevents stale installer caches, ambiguous update manifests, and same-version replacement problems.
+
 Because this source repository is private, installed clients do not embed a GitHub PAT. Private GitHub Releases remain the development source, while installed clients obtain update metadata/packages from the LAN-only Services01 feed.
 
 ```text
