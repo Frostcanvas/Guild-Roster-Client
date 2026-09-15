@@ -52,6 +52,33 @@ internal static class SourceLocator
             .ToArray();
     }
 
+    public static GrmSourceCandidate? FindPreferredCandidate(
+        string guildName,
+        string guildRealm,
+        string? configuredDirectory = null)
+    {
+        var candidates = FindCandidates(configuredDirectory);
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var guildKey = $"{guildName.Trim()}-{guildRealm.Trim()}";
+        var matchingGuild = candidates
+            .Where(candidate => ContainsGuildKey(candidate.FilePath, guildKey))
+            .OrderByDescending(candidate => SafeLastWriteUtc(candidate.FilePath))
+            .ToArray();
+
+        if (matchingGuild.Length > 0)
+        {
+            return matchingGuild[0];
+        }
+
+        return candidates
+            .OrderByDescending(candidate => SafeLastWriteUtc(candidate.FilePath))
+            .First();
+    }
+
     public static bool IsValidSavedVariablesDirectory(string? directory)
     {
         if (string.IsNullOrWhiteSpace(directory))
@@ -64,6 +91,50 @@ internal static class SourceLocator
 
     public static string GetGrmFilePath(string savedVariablesDirectory) =>
         Path.Combine(savedVariablesDirectory, GrmFileName);
+
+    private static bool ContainsGuildKey(string filePath, string guildKey)
+    {
+        try
+        {
+            var exactMarker = $"[\"{guildKey}\"]";
+            using var stream = new FileStream(
+                filePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            string? line;
+            while ((line = reader.ReadLine()) is not null)
+            {
+                if (line.Contains(exactMarker, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static DateTime SafeLastWriteUtc(string filePath)
+    {
+        try
+        {
+            return File.GetLastWriteTimeUtc(filePath);
+        }
+        catch
+        {
+            return DateTime.MinValue;
+        }
+    }
 
     private static void AddDirectory(
         IDictionary<string, GrmSourceCandidate> results,
