@@ -1,8 +1,15 @@
 # FrostLabs Guild Roster Client
 
-Private Windows client for the FrostLabs Hogwarts Academy guild roster system.
+Windows client for the FrostLabs Hogwarts Academy guild roster system.
 
 This is a **standalone application**. It is separate from Azeroth Questing Companion: it has its own repository, executable, installer, install location, local settings, update channel, release history, and lifecycle. Its user experience intentionally follows the proven Azeroth Questing Companion pattern: detect the local WoW data source, keep a retry queue, register with Services01 automatically in the background, sync without asking the player for server credentials, and self-update.
+
+Public source and releases:
+
+```text
+https://github.com/Frostcanvas/Guild-Roster-Client
+Default branch: main
+```
 
 The client reads Guild Roster Manager (GRM) SavedVariables from World of Warcraft Retail, validates the configured guild roster, normalizes it into the FrostLabs `FGR1` protocol, and uploads complete snapshots to the LAN-only Guild Roster API on Services01.
 
@@ -112,30 +119,12 @@ Only server-accepted complete snapshots can drive Active/Inactive transitions. A
 
 ## Automatic client updates
 
-The Guild Roster Client owns its own update path. It does not update Azeroth Questing Companion and Azeroth Questing Companion does not update it.
-
-Beginning with the next functional test release (`0.1.0-beta.4`), the updater is designed to mirror Azeroth Questing Companion more closely and read **GitHub Releases directly** instead of using Services01 as the normal update feed.
-
-Source remains private:
+Beginning with `0.1.0-beta.4`, normal client self-updates use this repository's **public GitHub Releases directly**, matching Azeroth Questing Companion more closely.
 
 ```text
-Frostcanvas/Guild-Roster-Client
-```
-
-The release-only repository is intentionally separate and public so installed clients can read GitHub Releases anonymously without embedding a GitHub PAT:
-
-```text
-Frostcanvas/Guild-Roster-Client-Releases
-```
-
-That public repository is release-distribution only. It must not contain private source code, server credentials, registration keys, bearer tokens, GitHub tokens, or roster data.
-
-The intended update path is:
-
-```text
-private source repo
+Frostcanvas/Guild-Roster-Client source
   -> GitHub Actions builds GuildRosterClient-Setup.exe
-  -> public Guild-Roster-Client-Releases GitHub Release
+  -> public GitHub Release in the same repository
   -> installed client queries the GitHub Releases API directly
   -> downloads GuildRosterClient-Setup.exe from GitHub
   -> verifies GitHub-provided SHA-256 digest and expected size
@@ -150,18 +139,21 @@ The updater:
 - Stable accepts only non-prerelease GitHub Releases;
 - Beta considers prerelease and stable releases and chooses the newest eligible version;
 - requires the exact `GuildRosterClient-Setup.exe` release asset;
-- requires the release asset SHA-256 digest before installation;
-- downloads the Windows installer to `%LOCALAPPDATA%\FrostLabs\GuildRoster\Updates\<version>`;
-- verifies SHA-256 and expected size before execution;
-- launches the installer elevated;
-- uses silent Inno Setup close/replace/restart behavior;
+- requires a valid SHA-256 digest before installation;
+- validates expected file size when supplied;
+- downloads the installer to `%LOCALAPPDATA%\FrostLabs\GuildRoster\Updates\<version>`;
+- launches the installer elevated with silent Inno Setup close/replace/restart behavior;
 - cleans stale update caches after seven days.
 
-The existing Services01 `/api/v1/client-updates/...` path remains only as a compatibility/bootstrap bridge for already-installed Beta 1-3 clients while the direct-GitHub Beta 4 transition is completed. It is not the intended normal update source for Beta 4 and later.
+No GitHub PAT or reusable GitHub credential is embedded in the client.
+
+The existing Services01 `/api/v1/client-updates/...` path remains only as a compatibility/bootstrap bridge for already-installed Beta 1-3 clients while the Beta 4 transition is completed. It is not the normal update source for Beta 4 and later.
 
 ### Prerelease version discipline
 
-Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version. Current progression is `0.1.0-beta.3`; the next functional test build is `0.1.0-beta.4`, then `beta.5`, `beta.6`, and so on. Internal source/documentation commits may occur between releases without consuming a beta number. This prevents stale installer caches, ambiguous update manifests, and same-version replacement problems.
+Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version. `0.1.0-beta.4` is the first direct-GitHub updater build; later functional test builds are `beta.5`, `beta.6`, and so on. Internal source/documentation commits may occur between releases without consuming a beta number.
+
+The release workflow also refuses to overwrite an existing `client-v<version>` release tag; a new functional build must use a new version.
 
 ## Local client state
 
@@ -179,12 +171,11 @@ Every user-testable beta installer gets a new monotonically increasing prereleas
 
 The project targets .NET 10 Windows Forms and produces a self-contained Windows x64 build.
 
-GitHub Actions builds `GuildRosterClient-Setup.exe` with Inno Setup on each push to `main`. The current source-repository workflow may still create a private source-repo prerelease during the transition, but Beta 4 is not considered ready for handoff until the corresponding installer is also published in the public release-only repository used by the installed updater.
+GitHub Actions builds `GuildRosterClient-Setup.exe` with Inno Setup on each push to `main`. A commit whose message starts with `Release client v` creates the corresponding GitHub Release in this public repository. Existing release tags/assets are not overwritten.
 
 ## Safety rules
 
 - Never embed the Services01 registration key, bridge key, GitHub token, or another reusable secret in source or release binaries.
-- Never place source-only private content, protected configuration, roster data, or credentials in the public release-only repository.
 - Automatic registration is LAN-only and returns a unique per-installation bearer token; the reusable protected registration key stays server-side.
 - Only complete validated Hogwarts Academy roster snapshots may be uploaded as complete `FGR1` snapshots.
 - A partial or ambiguous GRM parse must fail closed so it cannot incorrectly mark members inactive.
