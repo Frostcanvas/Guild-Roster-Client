@@ -62,11 +62,6 @@ internal static class RosterIdentityApiClient
         var result = await response.Content.ReadFromJsonAsync<IdentityUploadResponse>(JsonOptions, cancellationToken)
             ?? throw new InvalidDataException("Services01 returned an empty main/alt identity response.");
 
-        await RecoveryPromptService.PromptPendingAsync(
-            serverBaseUrl,
-            bearerToken,
-            cancellationToken);
-
         return new IdentityUploadResult(
             result.Status ?? "unknown",
             result.MemberCount,
