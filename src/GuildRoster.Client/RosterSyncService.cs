@@ -57,6 +57,10 @@ internal sealed class RosterSyncService
 
         progress?.Report($"Validated {parsed.Members.Count:N0} Hogwarts Academy characters from GRM.");
         var payload = GrmRosterParser.ToPayload(parsed, companionVersion);
+        var identity = await GrmIdentityParser.ParseAsync(grmFile, parsed, cancellationToken);
+        progress?.Report(
+            $"Validated main/alt identity · {identity.MainCount:N0} mains · {identity.AltCount:N0} alts · {identity.UnknownCount:N0} ungrouped.");
+
         var state = SyncStateService.Load(_jsonOptions);
         var currentChanged = !string.Equals(
             state.LastAcceptedSnapshotKey,
@@ -72,6 +76,26 @@ internal sealed class RosterSyncService
         var queuedBeforeUpload = GetQueuedCount();
         if (queuedBeforeUpload == 0)
         {
+            try
+            {
+                progress?.Report("Synchronizing GRM main/alt identity…");
+                await SyncIdentityAsync(
+                    settings,
+                    companionVersion,
+                    identity.Payload,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (IsRetryable(ex, cancellationToken))
+            {
+                return new RosterSyncOutcome(
+                    parsed.Members.Count,
+                    0,
+                    0,
+                    currentChanged,
+                    parsed.CapturedAt,
+                    $"Connected - roster unchanged · main/alt identity sync deferred and will retry. {ex.Message}");
+            }
+
             return new RosterSyncOutcome(
                 parsed.Members.Count,
                 0,
@@ -172,6 +196,26 @@ internal sealed class RosterSyncService
                 $"Services01 unavailable; {queued:N0} validated snapshot(s) queued for retry. {deferredReason}");
         }
 
+        try
+        {
+            progress?.Report("Synchronizing GRM main/alt identity…");
+            await SyncIdentityAsync(
+                settings,
+                companionVersion,
+                identity.Payload,
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsRetryable(ex, cancellationToken))
+        {
+            return new RosterSyncOutcome(
+                parsed.Members.Count,
+                uploaded,
+                queued,
+                currentChanged,
+                parsed.CapturedAt,
+                $"Roster synchronized; main/alt identity sync deferred and will retry. {ex.Message}");
+        }
+
         if (!currentChanged && !forceCurrentSnapshot && uploaded == 0)
         {
             return new RosterSyncOutcome(
@@ -190,6 +234,49 @@ internal sealed class RosterSyncService
             currentChanged,
             parsed.CapturedAt,
             $"Connected - roster synchronized · {parsed.Members.Count:N0} active characters · queue {queued:N0}.");
+    }
+
+    private async Task<IdentityUploadResult> SyncIdentityAsync(
+        ClientSettings settings,
+        string companionVersion,
+        RosterIdentityPayload payload,
+        CancellationToken cancellationToken)
+    {
+        var registration = await _apiClient.EnsureRegisteredAsync(
+            settings,
+            companionVersion,
+            cancellationToken);
+        try
+        {
+            var result = await RosterIdentityApiClient.UploadAsync(
+                settings.ServerBaseUrl,
+                registration.BearerToken,
+                payload,
+                cancellationToken);
+            if (!string.Equals(result.Status, "accepted", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"Services01 returned unexpected identity status '{result.Status}'.");
+            }
+            return result;
+        }
+        catch (GuildRosterApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            GuildRosterApiClient.ClearRegistration(settings);
+            registration = await _apiClient.EnsureRegisteredAsync(
+                settings,
+                companionVersion,
+                cancellationToken);
+            var result = await RosterIdentityApiClient.UploadAsync(
+                settings.ServerBaseUrl,
+                registration.BearerToken,
+                payload,
+                cancellationToken);
+            if (!string.Equals(result.Status, "accepted", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"Services01 returned unexpected identity status '{result.Status}'.");
+            }
+            return result;
+        }
     }
 
     private static bool IsRetryable(Exception ex, CancellationToken cancellationToken) => ex switch
