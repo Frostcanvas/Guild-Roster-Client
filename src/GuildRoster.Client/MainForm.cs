@@ -1,378 +1,461 @@
 using System.Diagnostics;
-using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace GuildRoster.Client;
 
 internal sealed class MainForm : Form
 {
+    private static readonly Color Background = Color.FromArgb(13, 16, 24);
+    private static readonly Color Sidebar = Color.FromArgb(20, 23, 34);
+    private static readonly Color Surface = Color.FromArgb(24, 28, 40);
+    private static readonly Color SurfaceAlt = Color.FromArgb(30, 34, 49);
+    private static readonly Color Border = Color.FromArgb(50, 56, 78);
+    private static readonly Color TextPrimary = Color.FromArgb(238, 240, 248);
+    private static readonly Color TextSecondary = Color.FromArgb(163, 170, 194);
+    private static readonly Color Gold = Color.FromArgb(231, 181, 67);
+    private static readonly Color Purple = Color.FromArgb(130, 95, 225);
+    private static readonly Color Green = Color.FromArgb(78, 214, 142);
+    private static readonly Color Orange = Color.FromArgb(238, 160, 74);
+
     private readonly ClientSettings _settings;
     private readonly UpdateFeedClient _updateFeedClient = new();
     private readonly ClientUpdateService _updateService;
     private readonly GuildRosterApiClient _apiClient = new();
     private readonly RosterSyncService _syncService;
 
-    private readonly TextBox _sourcePath = new() { Dock = DockStyle.Fill };
-    private readonly TextBox _serverUrl = new() { Dock = DockStyle.Fill };
-    private readonly ComboBox _updateChannel = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
-    private readonly CheckBox _autoSync = new() { Text = "Automatically sync when GRM saves", AutoSize = true };
-    private readonly Label _sourceStatus = new() { AutoSize = true };
-    private readonly Label _pairStatus = new() { AutoSize = true };
-    private readonly Label _syncStatus = new() { AutoSize = true };
-    private readonly Label _updateStatus = new() { AutoSize = true };
-    private readonly Button _pairButton = new() { Text = "Pair Client", AutoSize = true };
-    private readonly Button _syncButton = new() { Text = "Sync Now", AutoSize = true };
-    private readonly Button _checkUpdatesButton = new() { Text = "Check for Updates", AutoSize = true };
+    private readonly Label _clientVersionValue = CreateValueLabel("Starting...");
+    private readonly Label _sourceValue = CreateValueLabel("Detecting...");
+    private readonly Label _serverValue = CreateValueLabel("Checking...");
+    private readonly Label _queueValue = CreateValueLabel("0");
+    private readonly Label _rosterValue = CreateValueLabel("Not synced");
+    private readonly Label _lastSyncValue = CreateValueLabel("None yet");
+    private readonly Label _updateValue = CreateValueLabel("Not checked");
+    private readonly Label _heroStatusValue = CreateValueLabel("Detecting Guild Roster Manager...");
+    private readonly ToolStripStatusLabel _statusText = new("Starting...");
+    private readonly ListBox _activityList = new();
+    private readonly CheckBox _autoSync = new()
+    {
+        Text = "Automatically sync when GRM saves",
+        AutoSize = true,
+        BackColor = Color.Transparent,
+        ForeColor = TextSecondary,
+    };
+
+    private readonly Button _checkUpdatesButton = CreateActionButton("Check for Updates", Gold);
+    private readonly Button _syncButton = CreateActionButton("Sync Now", Purple);
+    private readonly Button _channelButton = CreateActionButton("Channel: STABLE", Purple);
+    private readonly Button _openRosterButton = CreateActionButton("Open Roster", Purple);
+    private readonly Button _sourceButton = CreateActionButton("Change GRM Source", Purple);
 
     private FileSystemWatcher? _watcher;
     private CancellationTokenSource? _watchDebounce;
     private bool _syncInProgress;
+    private bool _busy;
 
     public MainForm()
     {
+        AppPaths.EnsureCreated();
         _settings = SettingsService.Load();
         _updateService = new ClientUpdateService(_updateFeedClient);
         _syncService = new RosterSyncService(_apiClient);
 
         Text = "FrostLabs Guild Roster Client";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(820, 560);
-        Size = new Size(980, 650);
+        MinimumSize = new Size(1040, 650);
+        Size = new Size(1280, 760);
+        BackColor = Background;
+        ForeColor = TextPrimary;
+        AutoScaleMode = AutoScaleMode.Dpi;
 
         BuildUi();
-        LoadSettingsIntoUi();
-
-        Shown += async (_, _) =>
-        {
-            DiscoverSource();
-            ConfigureWatcher();
-            RefreshPairStatus();
-            RefreshSyncStatusFromState();
-
-            if (_settings.AutoSync && CredentialStore.HasToken && SourceLocator.IsValidSavedVariablesDirectory(_sourcePath.Text))
-            {
-                await SyncRosterAsync(forceCurrentSnapshot: false, silent: true);
-            }
-
-            await CheckForUpdatesAsync(silentWhenCurrent: true);
-        };
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
+        Shown += async (_, _) => await InitializeAsync();
+        FormClosed += (_, _) =>
         {
             _watchDebounce?.Cancel();
             _watchDebounce?.Dispose();
             _watcher?.Dispose();
             _apiClient.Dispose();
             _updateFeedClient.Dispose();
-        }
-        base.Dispose(disposing);
+        };
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        TryEnableDarkTitleBar();
     }
 
     private void BuildUi()
     {
-        var root = new TableLayoutPanel
+        var shell = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(20),
-            ColumnCount = 1,
-            AutoScroll = true,
-            AutoSize = true,
+            BackColor = Background,
+            ColumnCount = 2,
+            RowCount = 1,
+            Padding = Padding.Empty,
+            Margin = Padding.Empty,
         };
-        Controls.Add(root);
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        root.Controls.Add(new Label
-        {
-            Text = "FrostLabs Guild Roster Client",
-            Font = new Font(Font.FontFamily, 18, FontStyle.Bold),
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 4),
-        });
-        root.Controls.Add(new Label
-        {
-            Text = $"Version {GetRunningVersion()} · GRM → FGR1 → Hogwarts Academy",
-            AutoSize = true,
-            ForeColor = SystemColors.GrayText,
-            Margin = new Padding(0, 0, 0, 18),
-        });
+        shell.Controls.Add(BuildSidebar(), 0, 0);
+        shell.Controls.Add(BuildMainArea(), 1, 0);
+        Controls.Add(shell);
 
-        root.Controls.Add(CreateLabeledRow(
-            "GRM SavedVariables folder",
-            _sourcePath,
-            new Button { Text = "Browse…", AutoSize = true },
-            (_, button) => button.Click += (_, _) => BrowseForSource()));
-        root.Controls.Add(_sourceStatus);
-
-        root.Controls.Add(CreateLabeledRow("Services01 Guild Roster API", _serverUrl));
-        root.Controls.Add(new Label
-        {
-            Text = "Guild: Hogwarts Academy · Realm: BleedingHollow · Retail WOW_PROJECT_ID 1",
-            AutoSize = true,
-            ForeColor = SystemColors.GrayText,
-            Margin = new Padding(0, 4, 0, 8),
-        });
-
-        var pairingRow = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = true,
-            Margin = new Padding(0, 8, 0, 0),
-        };
-        pairingRow.Controls.Add(_pairButton);
-        pairingRow.Controls.Add(_pairStatus);
-        _pairButton.Click += async (_, _) => await PairClientAsync();
-        root.Controls.Add(pairingRow);
-
-        var syncRow = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = true,
-            Margin = new Padding(0, 10, 0, 0),
-        };
-        syncRow.Controls.Add(_syncButton);
-        syncRow.Controls.Add(_autoSync);
-        _syncButton.Click += async (_, _) => await SyncRosterAsync(forceCurrentSnapshot: true, silent: false);
-        root.Controls.Add(syncRow);
-        root.Controls.Add(_syncStatus);
-
-        _updateChannel.Items.AddRange(new object[] { "stable", "beta" });
-        var updateRow = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = true,
-            Margin = new Padding(0, 16, 0, 0),
-        };
-        updateRow.Controls.Add(new Label { Text = "Update channel", AutoSize = true, Padding = new Padding(0, 7, 8, 0) });
-        updateRow.Controls.Add(_updateChannel);
-        updateRow.Controls.Add(_checkUpdatesButton);
-        _checkUpdatesButton.Click += async (_, _) => await CheckForUpdatesAsync(silentWhenCurrent: false);
-        root.Controls.Add(updateRow);
-        root.Controls.Add(_updateStatus);
-
-        var buttons = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = true,
-            Margin = new Padding(0, 18, 0, 0),
-        };
-
-        var saveButton = new Button { Text = "Save Settings", AutoSize = true };
-        saveButton.Click += (_, _) => SaveSettings(showConfirmation: true);
-        buttons.Controls.Add(saveButton);
-
-        var openRosterButton = new Button { Text = "Open Hogwarts Academy Roster", AutoSize = true };
-        openRosterButton.Click += (_, _) => OpenRoster();
-        buttons.Controls.Add(openRosterButton);
-        root.Controls.Add(buttons);
-
-        root.Controls.Add(new Label
-        {
-            Text = "Safety: the client reads Guild_Roster_Manager.lua as data only. Incomplete or ambiguous GRM parses are blocked before upload, and queued snapshots retry without reading WoW process memory or automating gameplay.",
-            AutoSize = true,
-            MaximumSize = new Size(880, 0),
-            ForeColor = SystemColors.GrayText,
-            Margin = new Padding(0, 18, 0, 0),
-        });
-    }
-
-    private static Control CreateLabeledRow(
-        string labelText,
-        Control mainControl,
-        Button? actionButton = null,
-        Action<Control, Button>? configureAction = null)
-    {
-        var outer = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            ColumnCount = actionButton is null ? 1 : 2,
-            Margin = new Padding(0, 8, 0, 0),
-        };
-        outer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        if (actionButton is not null)
-        {
-            outer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        }
-
-        var label = new Label { Text = labelText, AutoSize = true };
-        outer.Controls.Add(label, 0, 0);
-        if (actionButton is not null)
-        {
-            outer.SetColumnSpan(label, 2);
-        }
-
-        outer.Controls.Add(mainControl, 0, 1);
-        if (actionButton is not null)
-        {
-            actionButton.Margin = new Padding(8, 0, 0, 0);
-            outer.Controls.Add(actionButton, 1, 1);
-            configureAction?.Invoke(mainControl, actionButton);
-        }
-
-        return outer;
-    }
-
-    private void LoadSettingsIntoUi()
-    {
-        _sourcePath.Text = _settings.SourceSavedVariablesPath ?? string.Empty;
-        _serverUrl.Text = _settings.ServerBaseUrl;
-        _updateChannel.SelectedItem = string.Equals(_settings.UpdateChannel, "beta", StringComparison.OrdinalIgnoreCase)
-            ? "beta"
-            : "stable";
+        _clientVersionValue.Text = GetRunningVersion();
         _autoSync.Checked = _settings.AutoSync;
+        _autoSync.CheckedChanged += (_, _) =>
+        {
+            _settings.AutoSync = _autoSync.Checked;
+            SettingsService.Save(_settings);
+            LogActivity(_settings.AutoSync ? "Automatic GRM sync enabled." : "Automatic GRM sync disabled.");
+        };
+        UpdateChannelButtonText();
+    }
+
+    private Control BuildSidebar()
+    {
+        var panel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Sidebar,
+            Padding = new Padding(12),
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 9,
+            BackColor = Sidebar,
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 86));
+        for (var i = 1; i <= 6; i++)
+        {
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        }
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+
+        var brand = new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "GR\nGuild Roster",
+            Font = new Font("Segoe UI", 14, FontStyle.Bold),
+            ForeColor = Gold,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Padding = new Padding(8, 4, 0, 4),
+        };
+        layout.Controls.Add(brand, 0, 0);
+
+        layout.Controls.Add(CreateNavButton("Home", (_, _) => SetStatus("Guild Roster dashboard ready."), active: true), 0, 1);
+        layout.Controls.Add(CreateNavButton("Sync", async (_, _) => await SyncRosterAsync(forceCurrentSnapshot: true, silent: false)), 0, 2);
+        layout.Controls.Add(CreateNavButton("Roster", (_, _) => OpenRoster()), 0, 3);
+        layout.Controls.Add(CreateNavButton("Source", (_, _) => BrowseForSource()), 0, 4);
+        layout.Controls.Add(CreateNavButton("Settings", (_, _) => ToggleUpdateChannel()), 0, 5);
+        layout.Controls.Add(CreateNavButton("Logs", (_, _) => OpenPath(AppPaths.Root)), 0, 6);
+
+        var footer = new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "HOGWARTS ACADEMY",
+            Font = new Font("Segoe UI", 8, FontStyle.Bold),
+            ForeColor = TextSecondary,
+            TextAlign = ContentAlignment.MiddleCenter,
+        };
+        layout.Controls.Add(footer, 0, 8);
+        panel.Controls.Add(layout);
+        return panel;
+    }
+
+    private Control BuildMainArea()
+    {
+        var main = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            BackColor = Background,
+        };
+        main.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+        main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        main.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+
+        main.Controls.Add(BuildTopBar(), 0, 0);
+        main.Controls.Add(BuildDashboardBody(), 0, 1);
+
+        var strip = new StatusStrip
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Sidebar,
+            ForeColor = Green,
+            SizingGrip = false,
+            RenderMode = ToolStripRenderMode.System,
+        };
+        strip.Items.Add(_statusText);
+        main.Controls.Add(strip, 0, 2);
+        return main;
+    }
+
+    private Control BuildTopBar()
+    {
+        var bar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Sidebar,
+            Padding = new Padding(14, 10, 10, 8),
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+        };
+
+        _checkUpdatesButton.Click += async (_, _) => await CheckForUpdatesAsync(showDialog: true);
+        _syncButton.Click += async (_, _) => await SyncRosterAsync(forceCurrentSnapshot: true, silent: false);
+        _channelButton.Click += (_, _) => ToggleUpdateChannel();
+        _openRosterButton.Click += (_, _) => OpenRoster();
+        _sourceButton.Click += (_, _) => BrowseForSource();
+
+        bar.Controls.Add(_checkUpdatesButton);
+        bar.Controls.Add(_syncButton);
+        bar.Controls.Add(_channelButton);
+        bar.Controls.Add(_openRosterButton);
+        bar.Controls.Add(_sourceButton);
+        return bar;
+    }
+
+    private Control BuildDashboardBody()
+    {
+        var scroll = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            BackColor = Background,
+            Padding = new Padding(20),
+        };
+
+        var body = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 1,
+            BackColor = Background,
+            Padding = new Padding(0),
+        };
+
+        var hero = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 132,
+            BackColor = Surface,
+            Padding = new Padding(22),
+            Margin = new Padding(0, 0, 0, 18),
+        };
+        var heroTitle = new Label
+        {
+            AutoSize = true,
+            Text = "Hogwarts Academy Guild Roster",
+            Font = new Font("Segoe UI", 20, FontStyle.Bold),
+            ForeColor = TextPrimary,
+            Location = new Point(20, 18),
+        };
+        _heroStatusValue.Location = new Point(22, 62);
+        _heroStatusValue.Font = new Font("Segoe UI", 11, FontStyle.Regular);
+        _heroStatusValue.MaximumSize = new Size(860, 0);
+        _autoSync.Location = new Point(22, 94);
+        hero.Controls.Add(heroTitle);
+        hero.Controls.Add(_heroStatusValue);
+        hero.Controls.Add(_autoSync);
+        body.Controls.Add(hero);
+
+        var cards = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 3,
+            RowCount = 2,
+            BackColor = Background,
+            Margin = new Padding(0, 0, 0, 18),
+        };
+        cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+        cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+        cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+
+        cards.Controls.Add(CreateMetricCard("CLIENT VERSION", _clientVersionValue), 0, 0);
+        cards.Controls.Add(CreateMetricCard("GRM SOURCE", _sourceValue), 1, 0);
+        cards.Controls.Add(CreateMetricCard("SERVICES01", _serverValue), 2, 0);
+        cards.Controls.Add(CreateMetricCard("ACTIVE CHARACTERS", _rosterValue), 0, 1);
+        cards.Controls.Add(CreateMetricCard("LAST SYNC", _lastSyncValue), 1, 1);
+        cards.Controls.Add(CreateMetricCard("QUEUE / UPDATES", BuildQueueUpdateValue()), 2, 1);
+        body.Controls.Add(cards);
+
+        var info = new Label
+        {
+            AutoSize = true,
+            MaximumSize = new Size(920, 0),
+            Text = "Works like Azeroth Questing Companion: it watches the local SavedVariables file, registers itself with Services01 automatically in the background, keeps a retry queue, and synchronizes without asking you for a pairing code. GRM Lua is read as data only and is never executed.",
+            Font = new Font("Segoe UI", 10),
+            ForeColor = TextSecondary,
+            Margin = new Padding(2, 4, 2, 18),
+        };
+        body.Controls.Add(info);
+
+        var activityHeader = new Label
+        {
+            AutoSize = true,
+            Text = "Recent Activity",
+            Font = new Font("Segoe UI", 13, FontStyle.Bold),
+            ForeColor = TextPrimary,
+            Margin = new Padding(0, 0, 0, 8),
+        };
+        body.Controls.Add(activityHeader);
+
+        _activityList.Height = 210;
+        _activityList.Dock = DockStyle.Top;
+        _activityList.BackColor = Surface;
+        _activityList.ForeColor = TextPrimary;
+        _activityList.BorderStyle = BorderStyle.FixedSingle;
+        _activityList.Font = new Font("Consolas", 9.5f);
+        body.Controls.Add(_activityList);
+
+        scroll.Controls.Add(body);
+        return scroll;
+    }
+
+    private Control BuildQueueUpdateValue()
+    {
+        var panel = new TableLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            BackColor = SurfaceAlt,
+        };
+        panel.Controls.Add(_queueValue, 0, 0);
+        _updateValue.Font = new Font("Segoe UI", 9, FontStyle.Regular);
+        panel.Controls.Add(_updateValue, 0, 1);
+        return panel;
+    }
+
+    private async Task InitializeAsync()
+    {
+        SetBusy(true, "Detecting Guild Roster Manager...");
+        try
+        {
+            DiscoverSource();
+            ConfigureWatcher();
+            RefreshSyncMetrics();
+
+            var healthy = await _apiClient.IsHealthyAsync(_settings.ServerBaseUrl);
+            _serverValue.Text = healthy ? "Connected" : "Offline - queueing locally";
+            _serverValue.ForeColor = healthy ? Green : Orange;
+
+            if (_settings.AutoSync && SourceLocator.IsValidSavedVariablesDirectory(_settings.SourceSavedVariablesPath))
+            {
+                await SyncRosterAsync(forceCurrentSnapshot: false, silent: true);
+            }
+
+            await CheckForUpdatesAsync(showDialog: false);
+            SetStatus("Guild Roster Client ready.");
+        }
+        catch (Exception ex)
+        {
+            LogActivity("Startup: " + ex.Message);
+            SetStatus("Ready with a startup warning.");
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     private void DiscoverSource()
     {
-        if (SourceLocator.IsValidSavedVariablesDirectory(_sourcePath.Text))
+        if (SourceLocator.IsValidSavedVariablesDirectory(_settings.SourceSavedVariablesPath))
         {
             RefreshSourceStatus();
             return;
         }
 
-        var candidates = SourceLocator.FindCandidates(_sourcePath.Text);
-        if (candidates.Count == 1)
+        var preferred = SourceLocator.FindPreferredCandidate(
+            _settings.GuildName,
+            _settings.GuildRealm,
+            _settings.SourceSavedVariablesPath);
+        if (preferred is not null)
         {
-            _sourcePath.Text = candidates[0].SavedVariablesDirectory;
-            _settings.SourceSavedVariablesPath = candidates[0].SavedVariablesDirectory;
+            _settings.SourceSavedVariablesPath = preferred.SavedVariablesDirectory;
             SettingsService.Save(_settings);
+            LogActivity($"GRM source selected automatically: {preferred.SavedVariablesDirectory}");
         }
 
-        RefreshSourceStatus(candidates.Count);
+        RefreshSourceStatus();
     }
 
-    private void RefreshSourceStatus(int? discoveredCount = null)
+    private void RefreshSourceStatus()
     {
-        if (!SourceLocator.IsValidSavedVariablesDirectory(_sourcePath.Text))
+        var path = _settings.SourceSavedVariablesPath;
+        if (!SourceLocator.IsValidSavedVariablesDirectory(path))
         {
-            _sourceStatus.Text = discoveredCount > 1
-                ? $"Multiple GRM files were found ({discoveredCount}). Choose the SavedVariables folder to use."
-                : "Guild_Roster_Manager.lua was not found in the selected folder.";
-            _sourceStatus.ForeColor = Color.DarkOrange;
+            _sourceValue.Text = "Not found";
+            _sourceValue.ForeColor = Orange;
+            _heroStatusValue.Text = "Guild_Roster_Manager.lua was not found. Choose the GRM source once and the client will remember it.";
+            _heroStatusValue.ForeColor = Orange;
             return;
         }
 
-        var filePath = SourceLocator.GetGrmFilePath(_sourcePath.Text.Trim());
+        var filePath = SourceLocator.GetGrmFilePath(path!);
         var info = new FileInfo(filePath);
-        _sourceStatus.Text = $"GRM source ready · {info.Length:N0} bytes · last written {info.LastWriteTime:G}";
-        _sourceStatus.ForeColor = Color.DarkGreen;
+        var accountName = Directory.GetParent(path!)?.Name ?? "WoW account";
+        _sourceValue.Text = $"{accountName} · {info.LastWriteTime:G}";
+        _sourceValue.ForeColor = Green;
+        _heroStatusValue.Text = $"Watching {filePath}";
+        _heroStatusValue.ForeColor = TextSecondary;
     }
 
-    private void RefreshPairStatus()
-    {
-        if (CredentialStore.HasToken)
-        {
-            _pairStatus.Text = string.IsNullOrWhiteSpace(_settings.InstallationId)
-                ? "Paired to Services01"
-                : $"Paired · installation {_settings.InstallationId}";
-            _pairStatus.ForeColor = Color.DarkGreen;
-            _pairButton.Text = "Pair Again";
-        }
-        else
-        {
-            _pairStatus.Text = "Not paired · generate a one-time code on Services01 first.";
-            _pairStatus.ForeColor = Color.DarkOrange;
-            _pairButton.Text = "Pair Client";
-        }
-    }
-
-    private void RefreshSyncStatusFromState()
+    private void RefreshSyncMetrics()
     {
         var state = _syncService.LoadState();
         var queued = _syncService.GetQueuedCount();
+        _queueValue.Text = $"{queued:N0} queued";
+        _queueValue.ForeColor = queued == 0 ? Green : Orange;
+
         if (state.LastSuccessfulSync is null)
         {
-            _syncStatus.Text = $"No successful roster sync yet · queue {queued:N0}.";
-            _syncStatus.ForeColor = SystemColors.GrayText;
-            return;
+            _rosterValue.Text = "Not synced";
+            _lastSyncValue.Text = "None yet";
+            _rosterValue.ForeColor = TextSecondary;
+            _lastSyncValue.ForeColor = TextSecondary;
         }
-
-        _syncStatus.Text = $"Last sync {state.LastSuccessfulSync.Value.LocalDateTime:G} · {state.LastAcceptedMemberCount:N0} characters · queue {queued:N0}.";
-        _syncStatus.ForeColor = Color.DarkGreen;
+        else
+        {
+            _rosterValue.Text = $"{state.LastAcceptedMemberCount:N0}";
+            _lastSyncValue.Text = state.LastSuccessfulSync.Value.LocalDateTime.ToString("g");
+            _rosterValue.ForeColor = Green;
+            _lastSyncValue.ForeColor = Green;
+        }
     }
 
     private void BrowseForSource()
     {
         using var dialog = new FolderBrowserDialog
         {
-            Description = "Select the WoW account SavedVariables folder that contains Guild_Roster_Manager.lua",
+            Description = "Select the WoW account SavedVariables folder containing Guild_Roster_Manager.lua",
             UseDescriptionForTitle = true,
-            InitialDirectory = Directory.Exists(_sourcePath.Text)
-                ? _sourcePath.Text
+            InitialDirectory = Directory.Exists(_settings.SourceSavedVariablesPath)
+                ? _settings.SourceSavedVariablesPath
                 : @"D:\Battle.net\World of Warcraft\_retail_\WTF\Account",
         };
-        if (dialog.ShowDialog(this) == DialogResult.OK)
-        {
-            _sourcePath.Text = dialog.SelectedPath;
-            SaveSettings(showConfirmation: false);
-            RefreshSourceStatus();
-            ConfigureWatcher();
-        }
-    }
-
-    private void SaveSettings(bool showConfirmation)
-    {
-        _settings.SourceSavedVariablesPath = _sourcePath.Text.Trim();
-        _settings.ServerBaseUrl = _serverUrl.Text.Trim().TrimEnd('/');
-        _settings.UpdateChannel = _updateChannel.SelectedItem?.ToString() ?? "stable";
-        _settings.GuildName = "Hogwarts Academy";
-        _settings.GuildRealm = "BleedingHollow";
-        _settings.AutoSync = _autoSync.Checked;
-        SettingsService.Save(_settings);
-        ConfigureWatcher();
-        RefreshSourceStatus();
-        if (showConfirmation)
-        {
-            _updateStatus.Text = "Settings saved.";
-        }
-    }
-
-    private async Task PairClientAsync()
-    {
-        SaveSettings(showConfirmation: false);
-        using var dialog = new PairingDialog();
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        _pairButton.Enabled = false;
-        try
-        {
-            _pairStatus.Text = "Pairing with Services01…";
-            _pairStatus.ForeColor = SystemColors.GrayText;
-            var result = await _apiClient.PairAsync(
-                _settings.ServerBaseUrl,
-                dialog.PairingCode,
-                Environment.MachineName,
-                GetRunningVersion());
-
-            CredentialStore.SaveToken(result.BearerToken);
-            _settings.InstallationId = result.InstallationId.ToString();
-            SettingsService.Save(_settings);
-            RefreshPairStatus();
-            await SyncRosterAsync(forceCurrentSnapshot: true, silent: true);
-        }
-        catch (Exception ex)
-        {
-            _pairStatus.Text = $"Pairing failed: {ex.Message}";
-            _pairStatus.ForeColor = Color.DarkRed;
-            MessageBox.Show(this, ex.Message, "Pairing Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-        finally
-        {
-            _pairButton.Enabled = true;
-        }
+        _settings.SourceSavedVariablesPath = dialog.SelectedPath;
+        SettingsService.Save(_settings);
+        ConfigureWatcher();
+        RefreshSourceStatus();
+        LogActivity("GRM source changed to " + dialog.SelectedPath);
     }
 
     private void ConfigureWatcher()
@@ -380,13 +463,13 @@ internal sealed class MainForm : Form
         _watcher?.Dispose();
         _watcher = null;
 
-        var directory = _sourcePath.Text.Trim();
+        var directory = _settings.SourceSavedVariablesPath;
         if (!SourceLocator.IsValidSavedVariablesDirectory(directory))
         {
             return;
         }
 
-        _watcher = new FileSystemWatcher(directory, "Guild_Roster_Manager.lua")
+        _watcher = new FileSystemWatcher(directory!, "Guild_Roster_Manager.lua")
         {
             NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
             EnableRaisingEvents = true,
@@ -424,17 +507,9 @@ internal sealed class MainForm : Form
 
         BeginInvoke(new Action(() =>
         {
-            try
-            {
-                RefreshSourceStatus();
-            }
-            catch
-            {
-                _sourceStatus.Text = "GRM source changed; waiting for WoW to finish writing the file.";
-                _sourceStatus.ForeColor = Color.DarkOrange;
-            }
-
-            if (_autoSync.Checked && CredentialStore.HasToken)
+            RefreshSourceStatus();
+            LogActivity("GRM SavedVariables changed.");
+            if (_settings.AutoSync)
             {
                 _ = SyncRosterAsync(forceCurrentSnapshot: false, silent: true);
             }
@@ -443,117 +518,109 @@ internal sealed class MainForm : Form
 
     private async Task SyncRosterAsync(bool forceCurrentSnapshot, bool silent)
     {
-        if (_syncInProgress)
+        if (_syncInProgress || _busy)
         {
-            return;
-        }
-
-        SaveSettings(showConfirmation: false);
-        var token = CredentialStore.LoadToken();
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            _syncStatus.Text = "Pair the Guild Roster Client with Services01 before syncing.";
-            _syncStatus.ForeColor = Color.DarkOrange;
-            if (!silent)
-            {
-                MessageBox.Show(this, "Pair the client with Services01 first.", "Guild Roster Sync", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
             return;
         }
 
         if (!SourceLocator.IsValidSavedVariablesDirectory(_settings.SourceSavedVariablesPath))
         {
-            _syncStatus.Text = "Guild_Roster_Manager.lua was not found. Select the correct SavedVariables folder.";
-            _syncStatus.ForeColor = Color.DarkOrange;
-            return;
+            DiscoverSource();
+            if (!SourceLocator.IsValidSavedVariablesDirectory(_settings.SourceSavedVariablesPath))
+            {
+                SetStatus("GRM source not found.");
+                if (!silent)
+                {
+                    MessageBox.Show(this, "Guild_Roster_Manager.lua was not found. Choose the GRM source first.", "Guild Roster Sync", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                return;
+            }
         }
 
         _syncInProgress = true;
-        _syncButton.Enabled = false;
+        SetBusy(true, "Reading GRM roster...");
         try
         {
             var progress = new Progress<string>(message =>
             {
-                _syncStatus.Text = message;
-                _syncStatus.ForeColor = SystemColors.GrayText;
+                SetStatus(message);
+                LogActivity(message);
             });
-
-            var outcome = await _syncService.SyncAsync(
+            var result = await _syncService.SyncAsync(
                 _settings,
-                token,
                 GetRunningVersion(),
                 forceCurrentSnapshot,
                 progress);
 
-            _syncStatus.Text = outcome.Message;
-            _syncStatus.ForeColor = outcome.QueuedSnapshots == 0 ? Color.DarkGreen : Color.DarkOrange;
-        }
-        catch (GuildRosterApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
-        {
-            CredentialStore.Clear();
-            _settings.InstallationId = null;
-            SettingsService.Save(_settings);
-            RefreshPairStatus();
-            _syncStatus.Text = "Services01 rejected this pairing. Generate a new one-time pairing code and pair again.";
-            _syncStatus.ForeColor = Color.DarkRed;
-            if (!silent)
+            RefreshSyncMetrics();
+            RefreshSourceStatus();
+            _serverValue.Text = result.QueuedSnapshots == 0 ? "Connected" : "Queueing for retry";
+            _serverValue.ForeColor = result.QueuedSnapshots == 0 ? Green : Orange;
+            _heroStatusValue.Text = result.Message;
+            _heroStatusValue.ForeColor = result.QueuedSnapshots == 0 ? Green : Orange;
+            SetStatus(result.Message);
+            LogActivity(result.Message);
+
+            if (!silent && result.QueuedSnapshots == 0)
             {
-                MessageBox.Show(this, _syncStatus.Text, "Guild Roster Sync", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-        catch (InvalidDataException ex)
-        {
-            _syncStatus.Text = $"Sync blocked for safety: {ex.Message}";
-            _syncStatus.ForeColor = Color.DarkRed;
-            if (!silent)
-            {
-                MessageBox.Show(this, ex.Message, "GRM Snapshot Rejected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, result.Message, "Guild Roster Sync", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
         catch (Exception ex)
         {
-            _syncStatus.Text = $"Sync failed: {ex.Message}";
-            _syncStatus.ForeColor = Color.DarkRed;
+            RefreshSyncMetrics();
+            _heroStatusValue.Text = "Sync blocked: " + ex.Message;
+            _heroStatusValue.ForeColor = Orange;
+            SetStatus("Sync blocked.");
+            LogActivity("Sync blocked: " + ex.Message);
             if (!silent)
             {
-                MessageBox.Show(this, ex.Message, "Guild Roster Sync Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, ex.Message, "Guild Roster Sync", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
         finally
         {
             _syncInProgress = false;
-            _syncButton.Enabled = true;
+            SetBusy(false);
         }
     }
 
-    private async Task CheckForUpdatesAsync(bool silentWhenCurrent)
+    private async Task CheckForUpdatesAsync(bool showDialog)
     {
+        if (_busy)
+        {
+            return;
+        }
+
         _checkUpdatesButton.Enabled = false;
         try
         {
-            var server = _serverUrl.Text.Trim().TrimEnd('/');
-            var channel = _updateChannel.SelectedItem?.ToString() ?? "stable";
-            _updateStatus.Text = "Checking for Guild Roster Client updates…";
-
-            var package = await _updateFeedClient.GetLatestAsync(server, channel);
+            var channel = NormalizeChannel(_settings.UpdateChannel);
+            _updateValue.Text = $"Checking {channel}...";
+            var package = await _updateFeedClient.GetLatestAsync(_settings.ServerBaseUrl, channel);
             if (package is null)
             {
-                _updateStatus.Text = "No Guild Roster Client update has been published yet.";
+                _updateValue.Text = $"No {channel} update published";
                 return;
             }
 
             var current = GetRunningVersion();
             if (!ReleaseVersionUtility.IsNewer(current, package.Version))
             {
-                _updateStatus.Text = $"Up to date · {current} · {channel} channel";
-                if (!silentWhenCurrent)
+                _updateValue.Text = $"Up to date · {current}";
+                if (showDialog)
                 {
                     MessageBox.Show(this, "Guild Roster Client is up to date.", "Updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 return;
             }
 
-            _updateStatus.Text = $"Update available: {package.Version}";
+            _updateValue.Text = $"Update available · {package.Version}";
+            if (!showDialog)
+            {
+                return;
+            }
+
             var choice = MessageBox.Show(
                 this,
                 $"Guild Roster Client {package.Version} is available.\n\nDownload and install it now?",
@@ -565,13 +632,18 @@ internal sealed class MainForm : Form
                 return;
             }
 
-            var progress = new Progress<string>(message => _updateStatus.Text = message);
+            var progress = new Progress<string>(message =>
+            {
+                _updateValue.Text = message;
+                SetStatus(message);
+            });
             await _updateService.StageAndLaunchUpdateAsync(package, progress);
         }
         catch (Exception ex)
         {
-            _updateStatus.Text = $"Update check failed: {ex.Message}";
-            if (!silentWhenCurrent)
+            _updateValue.Text = "Update check unavailable";
+            LogActivity("Update check: " + ex.Message);
+            if (showDialog)
             {
                 MessageBox.Show(this, ex.Message, "Update Check Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
@@ -582,14 +654,153 @@ internal sealed class MainForm : Form
         }
     }
 
+    private void ToggleUpdateChannel()
+    {
+        _settings.UpdateChannel = NormalizeChannel(_settings.UpdateChannel) == "stable" ? "beta" : "stable";
+        SettingsService.Save(_settings);
+        UpdateChannelButtonText();
+        _updateValue.Text = $"Channel changed to {_settings.UpdateChannel}.";
+        LogActivity($"Update channel changed to {_settings.UpdateChannel}.");
+    }
+
+    private void UpdateChannelButtonText()
+    {
+        _channelButton.Text = $"Channel: {NormalizeChannel(_settings.UpdateChannel).ToUpperInvariant()}";
+    }
+
+    private static string NormalizeChannel(string? channel) =>
+        string.Equals(channel, "beta", StringComparison.OrdinalIgnoreCase) ? "beta" : "stable";
+
     private void OpenRoster()
     {
-        var server = _serverUrl.Text.Trim().TrimEnd('/');
         Process.Start(new ProcessStartInfo
         {
-            FileName = $"{server}/roster",
+            FileName = _settings.ServerBaseUrl.Trim().TrimEnd('/') + "/roster",
             UseShellExecute = true,
         });
+    }
+
+    private static void OpenPath(string path)
+    {
+        AppPaths.EnsureCreated();
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true,
+        });
+    }
+
+    private void SetBusy(bool busy, string? status = null)
+    {
+        _busy = busy;
+        _syncButton.Enabled = !busy;
+        _sourceButton.Enabled = !busy;
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            SetStatus(status);
+        }
+    }
+
+    private void SetStatus(string text)
+    {
+        _statusText.Text = text;
+    }
+
+    private void LogActivity(string text)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        var line = $"{DateTime.Now:HH:mm:ss}  {text}";
+        _activityList.Items.Insert(0, line);
+        while (_activityList.Items.Count > 80)
+        {
+            _activityList.Items.RemoveAt(_activityList.Items.Count - 1);
+        }
+    }
+
+    private static Label CreateValueLabel(string text) => new()
+    {
+        AutoSize = true,
+        Text = text,
+        Font = new Font("Segoe UI", 11, FontStyle.Bold),
+        ForeColor = TextPrimary,
+        MaximumSize = new Size(285, 0),
+        Margin = new Padding(0, 4, 0, 0),
+    };
+
+    private static Control CreateMetricCard(string title, Control value)
+    {
+        var card = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = SurfaceAlt,
+            Margin = new Padding(5),
+            Padding = new Padding(16),
+            MinimumSize = new Size(250, 104),
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            BackColor = SurfaceAlt,
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = title,
+            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+            ForeColor = TextSecondary,
+        }, 0, 0);
+        value.Margin = new Padding(0, 2, 0, 0);
+        layout.Controls.Add(value, 0, 1);
+        card.Controls.Add(layout);
+        return card;
+    }
+
+    private static Button CreateActionButton(string text, Color accent)
+    {
+        var button = new Button
+        {
+            AutoSize = true,
+            Text = text,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = SurfaceAlt,
+            ForeColor = TextPrimary,
+            Font = new Font("Segoe UI", 9, FontStyle.Bold),
+            Margin = new Padding(4, 0, 4, 0),
+            Padding = new Padding(8, 5, 8, 5),
+            Cursor = Cursors.Hand,
+        };
+        button.FlatAppearance.BorderColor = accent;
+        button.FlatAppearance.BorderSize = 1;
+        return button;
+    }
+
+    private static Button CreateNavButton(string text, EventHandler handler, bool active = false)
+    {
+        var button = new Button
+        {
+            Dock = DockStyle.Fill,
+            Text = text,
+            TextAlign = ContentAlignment.MiddleLeft,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = active ? SurfaceAlt : Sidebar,
+            ForeColor = active ? Gold : TextPrimary,
+            Font = new Font("Segoe UI", 10, active ? FontStyle.Bold : FontStyle.Regular),
+            Padding = new Padding(12, 0, 0, 0),
+            Cursor = Cursors.Hand,
+            Margin = new Padding(0, 2, 0, 2),
+        };
+        button.FlatAppearance.BorderSize = 0;
+        button.Click += handler;
+        return button;
     }
 
     private static string GetRunningVersion()
@@ -606,4 +817,30 @@ internal sealed class MainForm : Form
 
         return assembly.GetName().Version?.ToString(3) ?? "unknown";
     }
+
+    private static void TryEnableDarkTitleBar()
+    {
+        // No-op until a window handle is available; handled by the overload below.
+    }
+
+    private void TryEnableDarkTitleBarForHandle()
+    {
+        try
+        {
+            var enabled = 1;
+            _ = DwmSetWindowAttribute(Handle, 20, ref enabled, sizeof(int));
+        }
+        catch
+        {
+            // Cosmetic only.
+        }
+    }
+
+    private new void TryEnableDarkTitleBar()
+    {
+        TryEnableDarkTitleBarForHandle();
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 }
