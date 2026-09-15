@@ -14,7 +14,7 @@ internal sealed record RemoteClientPackage(
 internal sealed class UpdateFeedClient : IDisposable
 {
     private const string Owner = "Frostcanvas";
-    private const string ReleaseRepository = "Guild-Roster-Client-Releases";
+    private const string ReleaseRepository = "Guild-Roster-Client";
     private const string InstallerAssetName = "GuildRosterClient-Setup.exe";
 
     private readonly HttpClient _httpClient;
@@ -36,6 +36,8 @@ internal sealed class UpdateFeedClient : IDisposable
         string channel,
         CancellationToken cancellationToken = default)
     {
+        // Retained in the method signature for compatibility with the existing UI/service wiring.
+        // Beta 4 and later read releases directly from the public GitHub repository.
         _ = serverBaseUrl;
 
         var normalizedChannel = string.Equals(channel, "beta", StringComparison.OrdinalIgnoreCase)
