@@ -21,6 +21,12 @@ internal sealed class RosterSyncService
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         WriteIndented = true,
     };
+    private readonly JsonSerializerOptions _archiveJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = false,
+    };
 
     public RosterSyncService(GuildRosterApiClient apiClient)
     {
@@ -30,7 +36,9 @@ internal sealed class RosterSyncService
     public int GetQueuedCount()
     {
         AppPaths.EnsureCreated();
-        return Directory.EnumerateFiles(AppPaths.OutboxRoot, "*.json", SearchOption.TopDirectoryOnly).Count();
+        var roster = Directory.EnumerateFiles(AppPaths.OutboxRoot, "*.json", SearchOption.TopDirectoryOnly).Count();
+        var archive = Directory.EnumerateFiles(AppPaths.GrmArchiveOutboxRoot, "*.json", SearchOption.TopDirectoryOnly).Count();
+        return roster + archive;
     }
 
     public SyncState LoadState() => SyncStateService.Load(_jsonOptions);
@@ -61,6 +69,11 @@ internal sealed class RosterSyncService
         progress?.Report(
             $"Validated main/alt identity · {identity.MainCount:N0} mains · {identity.AltCount:N0} alts · {identity.UnknownCount:N0} ungrouped.");
 
+        progress?.Report("Parsing the complete GRM archive…");
+        var archive = await GrmArchiveParser.ParseAsync(grmFile, parsed, cancellationToken);
+        progress?.Report(
+            $"GRM archive ready · {archive.VariableCount:N0} variables · {archive.RestoreProfileCount:N0} restore profile record(s) · {archive.ParseErrorCount:N0} unsupported variable(s).");
+
         var state = SyncStateService.Load(_jsonOptions);
         var currentChanged = !string.Equals(
             state.LastAcceptedSnapshotKey,
@@ -71,6 +84,16 @@ internal sealed class RosterSyncService
         if (forceCurrentSnapshot || currentChanged || File.Exists(currentOutboxPath))
         {
             QueuePayload(payload, currentOutboxPath);
+        }
+
+        var archiveOutboxPath = GetArchiveOutboxPath(archive.Payload.ArchiveKey);
+        if (!string.Equals(
+                state.LastAcceptedGrmArchiveKey,
+                archive.Payload.ArchiveKey,
+                StringComparison.OrdinalIgnoreCase) ||
+            File.Exists(archiveOutboxPath))
+        {
+            QueueArchivePayload(archive.Payload, archiveOutboxPath);
         }
 
         var queuedBeforeUpload = GetQueuedCount();
@@ -102,7 +125,7 @@ internal sealed class RosterSyncService
                 0,
                 currentChanged,
                 parsed.CapturedAt,
-                $"Connected - no roster changes · {parsed.Members.Count:N0} active characters.");
+                $"Connected - no roster or GRM archive changes · {parsed.Members.Count:N0} active characters.");
         }
 
         string bearerToken;
@@ -124,7 +147,7 @@ internal sealed class RosterSyncService
                 queuedDuringRegistration,
                 currentChanged,
                 parsed.CapturedAt,
-                $"Services01 unavailable; {queuedDuringRegistration:N0} validated snapshot(s) queued for retry. {ex.Message}");
+                $"Services01 unavailable; {queuedDuringRegistration:N0} validated item(s) queued for retry. {ex.Message}");
         }
 
         var uploaded = 0;
@@ -184,6 +207,66 @@ internal sealed class RosterSyncService
             }
         }
 
+        if (deferredReason is null)
+        {
+            foreach (var path in Directory.EnumerateFiles(AppPaths.GrmArchiveOutboxRoot, "*.json")
+                         .OrderBy(File.GetCreationTimeUtc)
+                         .ThenBy(file => file, StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var queuedArchive = LoadQueuedArchivePayload(path);
+                progress?.Report($"Uploading full GRM archive {queuedArchive.ArchiveKey[..12]}…");
+
+                try
+                {
+                    GrmArchiveUploadResult result;
+                    try
+                    {
+                        result = await GrmArchiveApiClient.UploadAsync(
+                            settings.ServerBaseUrl,
+                            bearerToken,
+                            queuedArchive,
+                            cancellationToken);
+                    }
+                    catch (GuildRosterApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+                    {
+                        GuildRosterApiClient.ClearRegistration(settings);
+                        var registration = await _apiClient.EnsureRegisteredAsync(
+                            settings,
+                            companionVersion,
+                            cancellationToken);
+                        bearerToken = registration.BearerToken;
+                        result = await GrmArchiveApiClient.UploadAsync(
+                            settings.ServerBaseUrl,
+                            bearerToken,
+                            queuedArchive,
+                            cancellationToken);
+                    }
+
+                    if (!string.Equals(result.Status, "accepted", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(result.Status, "duplicate", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidDataException($"Services01 returned unexpected GRM archive status '{result.Status}'.");
+                    }
+
+                    File.Delete(path);
+                    uploaded++;
+                    state.LastAcceptedGrmArchiveKey = queuedArchive.ArchiveKey;
+                    state.LastSuccessfulGrmArchiveSync = DateTimeOffset.UtcNow;
+                    SyncStateService.Save(state, _jsonOptions);
+                    if (result.RecoveryOfferCount > 0)
+                    {
+                        progress?.Report($"Detected {result.RecoveryOfferCount:N0} returning member recovery offer(s).");
+                    }
+                }
+                catch (Exception ex) when (IsRetryable(ex, cancellationToken))
+                {
+                    deferredReason = ex.Message;
+                    break;
+                }
+            }
+        }
+
         var queued = GetQueuedCount();
         if (deferredReason is not null)
         {
@@ -193,7 +276,7 @@ internal sealed class RosterSyncService
                 queued,
                 currentChanged,
                 parsed.CapturedAt,
-                $"Services01 unavailable; {queued:N0} validated snapshot(s) queued for retry. {deferredReason}");
+                $"Services01 unavailable; {queued:N0} validated item(s) queued for retry. {deferredReason}");
         }
 
         try
@@ -213,7 +296,7 @@ internal sealed class RosterSyncService
                 queued,
                 currentChanged,
                 parsed.CapturedAt,
-                $"Roster synchronized; main/alt identity sync deferred and will retry. {ex.Message}");
+                $"Roster and GRM archive synchronized; main/alt identity sync deferred and will retry. {ex.Message}");
         }
 
         if (!currentChanged && !forceCurrentSnapshot && uploaded == 0)
@@ -224,7 +307,7 @@ internal sealed class RosterSyncService
                 queued,
                 false,
                 parsed.CapturedAt,
-                $"Connected - no roster changes · {parsed.Members.Count:N0} active characters · queue {queued:N0}.");
+                $"Connected - no changes · {parsed.Members.Count:N0} active characters · queue {queued:N0}.");
         }
 
         return new RosterSyncOutcome(
@@ -233,7 +316,61 @@ internal sealed class RosterSyncService
             queued,
             currentChanged,
             parsed.CapturedAt,
-            $"Connected - roster synchronized · {parsed.Members.Count:N0} active characters · queue {queued:N0}.");
+            $"Connected - roster and full GRM archive synchronized · {parsed.Members.Count:N0} active characters · queue {queued:N0}.");
+    }
+
+    public async Task<IReadOnlyList<RecoveryOffer>> GetPendingRecoveryOffersAsync(
+        ClientSettings settings,
+        string companionVersion,
+        CancellationToken cancellationToken = default)
+    {
+        var registration = await _apiClient.EnsureRegisteredAsync(settings, companionVersion, cancellationToken);
+        try
+        {
+            return await GrmArchiveApiClient.GetPendingRecoveryOffersAsync(
+                settings.ServerBaseUrl,
+                registration.BearerToken,
+                cancellationToken);
+        }
+        catch (GuildRosterApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            GuildRosterApiClient.ClearRegistration(settings);
+            registration = await _apiClient.EnsureRegisteredAsync(settings, companionVersion, cancellationToken);
+            return await GrmArchiveApiClient.GetPendingRecoveryOffersAsync(
+                settings.ServerBaseUrl,
+                registration.BearerToken,
+                cancellationToken);
+        }
+    }
+
+    public async Task DecideRecoveryOfferAsync(
+        ClientSettings settings,
+        string companionVersion,
+        long offerId,
+        string decision,
+        CancellationToken cancellationToken = default)
+    {
+        var registration = await _apiClient.EnsureRegisteredAsync(settings, companionVersion, cancellationToken);
+        try
+        {
+            await GrmArchiveApiClient.DecideRecoveryOfferAsync(
+                settings.ServerBaseUrl,
+                registration.BearerToken,
+                offerId,
+                decision,
+                cancellationToken);
+        }
+        catch (GuildRosterApiException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            GuildRosterApiClient.ClearRegistration(settings);
+            registration = await _apiClient.EnsureRegisteredAsync(settings, companionVersion, cancellationToken);
+            await GrmArchiveApiClient.DecideRecoveryOfferAsync(
+                settings.ServerBaseUrl,
+                registration.BearerToken,
+                offerId,
+                decision,
+                cancellationToken);
+        }
     }
 
     private async Task<IdentityUploadResult> SyncIdentityAsync(
@@ -296,6 +433,9 @@ internal sealed class RosterSyncService
     private string GetOutboxPath(string snapshotKey) =>
         Path.Combine(AppPaths.OutboxRoot, $"{snapshotKey}.json");
 
+    private string GetArchiveOutboxPath(string archiveKey) =>
+        Path.Combine(AppPaths.GrmArchiveOutboxRoot, $"{archiveKey}.json");
+
     private void QueuePayload(RosterSnapshotPayload payload, string destination)
     {
         AppPaths.EnsureCreated();
@@ -306,6 +446,20 @@ internal sealed class RosterSyncService
 
         var tempPath = destination + ".tmp";
         var json = JsonSerializer.Serialize(payload, _jsonOptions);
+        File.WriteAllText(tempPath, json);
+        File.Move(tempPath, destination, overwrite: false);
+    }
+
+    private void QueueArchivePayload(GrmArchivePayload payload, string destination)
+    {
+        AppPaths.EnsureCreated();
+        if (File.Exists(destination))
+        {
+            return;
+        }
+
+        var tempPath = destination + ".tmp";
+        var json = JsonSerializer.Serialize(payload, _archiveJsonOptions);
         File.WriteAllText(tempPath, json);
         File.Move(tempPath, destination, overwrite: false);
     }
@@ -325,6 +479,22 @@ internal sealed class RosterSyncService
                 ex);
         }
     }
+
+    private GrmArchivePayload LoadQueuedArchivePayload(string path)
+    {
+        try
+        {
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<GrmArchivePayload>(json, _archiveJsonOptions)
+                ?? throw new InvalidDataException($"Queued GRM archive '{Path.GetFileName(path)}' was empty.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(
+                $"Queued GRM archive '{Path.GetFileName(path)}' is invalid and was not uploaded.",
+                ex);
+        }
+    }
 }
 
 internal sealed class SyncState
@@ -333,6 +503,8 @@ internal sealed class SyncState
     public int LastAcceptedMemberCount { get; set; }
     public DateTimeOffset? LastSuccessfulSync { get; set; }
     public long? LastServerSnapshotId { get; set; }
+    public string? LastAcceptedGrmArchiveKey { get; set; }
+    public DateTimeOffset? LastSuccessfulGrmArchiveSync { get; set; }
 }
 
 internal static class SyncStateService
