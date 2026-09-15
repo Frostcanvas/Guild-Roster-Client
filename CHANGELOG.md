@@ -8,16 +8,39 @@ The project follows a simple chronological changelog while the client is under i
 
 ### Planned integration
 
-- Extend the normalized server model for GRM main/alt relationships and selected GRM historical/backfill fields.
 - Link roster identities to Discord numeric user IDs through the shared Guild Roster database.
 - Allow Guild Executive to consume the shared Guild Roster person/identity view without becoming the canonical roster store.
+- Add selected GRM historical/backfill fields after current main/alt identity is proven live.
 
 ### Release process
 
 - Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version.
-- After `0.1.0-beta.4`, the next functional client test build is `beta.5`, then `beta.6`, and so on.
+- After `0.1.0-beta.5`, the next functional client test build is `beta.6`, then `beta.7`, and so on.
 - Internal source/documentation commits may occur between installer releases without consuming a beta number.
 - The GitHub Actions release step fails if the release tag already exists instead of overwriting the existing installer.
+
+## 0.1.0 Beta 5 - 2026-09-14
+
+### Added
+
+- Added direct parsing of GRM's `GRM_Alts` table alongside the already validated current Hogwarts Academy roster.
+- Added exact main/alt validation using each current member's `altGroup`, the matching GRM alt-group member list, and the group's declared `main` character.
+- Added a complete main/alt identity upload to the Services01 Guild Roster API after normal roster synchronization.
+- Added fail-closed checks that block identity changes when an alt group is missing, a group member is inconsistent, the declared main is not in the current roster, or the GRM file changes between roster and identity parsing.
+- Current supplied Hogwarts Academy GRM data validates as 209 current characters: 134 declared mains, 41 alts, and 34 characters with no GRM alt group. No member names or raw roster data are committed.
+
+### Changed
+
+- Main/alt identity now feeds the existing shared `guild_people` / `person_characters` model used by the Hogwarts Academy roster page, so grouped characters can render as Main or Alt instead of Unknown once the corresponding Services01 endpoint is live.
+- Identity synchronization retries independently from the complete-roster outbox; a temporary identity-endpoint/network failure does not turn a partial roster into a destructive complete snapshot.
+- Beta 5 continues using the public `Frostcanvas/Guild-Roster-Client` GitHub Releases feed directly for updates. Services01 is not the normal client-update source.
+
+### Release evidence
+
+- Release tag: `client-v0.1.0-beta.5`.
+- Release commit: `e371b2dbc95c47d23007ab5f3bb7a15a6066bfa4`.
+- GitHub Actions Windows publish, executable verification, installer build, artifact upload, and public prerelease publication all passed.
+- Installer: `GuildRosterClient-Setup.exe`, 37,267,371 bytes, SHA-256 `f18a684a14ad767c6f7a5600fbadd40a571cf02bf5eb9b34ecb703d4bacf068a`.
 
 ## 0.1.0 Beta 4 - 2026-09-14
 
