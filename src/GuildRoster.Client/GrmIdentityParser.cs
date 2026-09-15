@@ -1,8 +1,11 @@
+using System.Globalization;
+
 namespace GuildRoster.Client;
 
 internal static class GrmIdentityParser
 {
     private const string AltGroupsVariable = "GRM_Alts";
+    private const string MemberHistoryVariable = "GRM_GuildMemberHistory_Save";
 
     public static async Task<GrmIdentityParseResult> ParseAsync(
         string filePath,
@@ -22,6 +25,17 @@ internal static class GrmIdentityParser
             throw new InvalidDataException($"GRM main/alt data does not contain '{guildKey}'. Identity sync was blocked.");
         }
 
+        LuaTable? guildMembers = null;
+        try
+        {
+            var memberRoot = LuaSavedVariablesParser.ParseAssignment(text, MemberHistoryVariable);
+            memberRoot.TryGetTable(guildKey, out guildMembers!);
+        }
+        catch (InvalidDataException)
+        {
+            guildMembers = null;
+        }
+
         var byFullName = roster.Members.ToDictionary(
             member => $"{member.Name}-{member.Realm}",
             member => member,
@@ -33,10 +47,19 @@ internal static class GrmIdentityParser
         foreach (var member in roster.Members)
         {
             var fullName = $"{member.Name}-{member.Realm}";
+            var metadata = GetMetadata(guildMembers, fullName, member.PlayerGuid);
             var altGroup = Normalize(member.AltGroup);
             if (altGroup is null)
             {
-                identityMembers.Add(new GrmIdentityMember(member.PlayerGuid, "unknown", null, null));
+                identityMembers.Add(new GrmIdentityMember(
+                    member.PlayerGuid,
+                    "unknown",
+                    null,
+                    null,
+                    metadata.Present,
+                    metadata.CustomNote,
+                    metadata.JoinDate,
+                    metadata.JoinDateHistory));
                 continue;
             }
 
@@ -83,7 +106,11 @@ internal static class GrmIdentityParser
                 member.PlayerGuid,
                 relationship,
                 mainMember.PlayerGuid,
-                altGroup));
+                altGroup,
+                metadata.Present,
+                metadata.CustomNote,
+                metadata.JoinDate,
+                metadata.JoinDateHistory));
         }
 
         foreach (var (altGroup, assignedNames) in referencedGroups)
@@ -111,6 +138,19 @@ internal static class GrmIdentityParser
                 Relationship = row.Relationship,
                 MainPlayerGuid = row.MainPlayerGuid,
                 AltGroup = row.AltGroup,
+                GrmMetadataPresent = row.GrmMetadataPresent,
+                CustomNote = row.CustomNote,
+                JoinDate = row.JoinDate,
+                JoinDateHistory = row.JoinDateHistory.Select(item => new RosterJoinDateHistoryPayload
+                {
+                    Day = item.Day,
+                    Month = item.Month,
+                    Year = item.Year,
+                    DateKey = item.DateKey,
+                    Epoch = item.Epoch,
+                    Confirmed = item.Confirmed,
+                    EventType = item.EventType,
+                }).ToList(),
             }).ToList(),
         };
 
@@ -119,6 +159,128 @@ internal static class GrmIdentityParser
         var unknownCount = identityMembers.Count - mainCount - altCount;
         return new GrmIdentityParseResult(payload, mainCount, altCount, unknownCount);
     }
+
+    private static (bool Present, string? CustomNote, string? JoinDate, IReadOnlyList<GrmJoinDateHistoryEntry> JoinDateHistory) GetMetadata(
+        LuaTable? guildMembers,
+        string fullName,
+        string expectedGuid)
+    {
+        if (guildMembers is null || !guildMembers.TryGetTable(fullName, out var memberTable))
+        {
+            return (false, null, null, Array.Empty<GrmJoinDateHistoryEntry>());
+        }
+
+        var sourceGuid = Normalize(memberTable.GetString("GUID"));
+        if (!string.Equals(sourceGuid, expectedGuid, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"GRM metadata GUID for '{fullName}' did not match the validated roster GUID. Identity sync was blocked.");
+        }
+
+        string? customNote = null;
+        if (memberTable.TryGetTable("customNote", out var customTable) && customTable.Values.Count >= 4)
+        {
+            customNote = Normalize(ToStringValue(customTable.Values[3]));
+            if (customNote is { Length: > 2048 })
+            {
+                customNote = customNote[..2048];
+            }
+        }
+
+        var history = new List<GrmJoinDateHistoryEntry>();
+        if (memberTable.TryGetTable("joinDateHist", out var historyTable))
+        {
+            foreach (var value in historyTable.Values)
+            {
+                if (value is not LuaTable row || row.Values.Count < 7)
+                {
+                    continue;
+                }
+
+                var day = ToInt(row.Values[0]);
+                var month = ToInt(row.Values[1]);
+                var year = ToInt(row.Values[2]);
+                var dateKey = Normalize(ToStringValue(row.Values[3]));
+                var eventType = ToInt(row.Values[6]);
+                if (day is null || month is null || year is null || eventType is null || dateKey is null)
+                {
+                    continue;
+                }
+
+                history.Add(new GrmJoinDateHistoryEntry(
+                    day.Value,
+                    month.Value,
+                    year.Value,
+                    dateKey,
+                    ToLong(row.Values[4]),
+                    ToBool(row.Values[5]),
+                    eventType.Value));
+            }
+        }
+
+        string? joinDate = null;
+        if (!memberTable.GetBool("joinDateUnknown") && history.Count > 0)
+        {
+            var current = history[0];
+            if (current.EventType == 2 && history.Count > 1)
+            {
+                current = history[1];
+            }
+            if (TryFormatDate(current.Day, current.Month, current.Year, out var formatted))
+            {
+                joinDate = formatted;
+            }
+        }
+
+        return (true, customNote, joinDate, history);
+    }
+
+    private static bool TryFormatDate(int day, int month, int year, out string value)
+    {
+        try
+        {
+            value = new DateOnly(year, month, day).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            value = string.Empty;
+            return false;
+        }
+    }
+
+    private static string? ToStringValue(object? value) => value switch
+    {
+        string text => text,
+        long integer => integer.ToString(CultureInfo.InvariantCulture),
+        double number => number.ToString(CultureInfo.InvariantCulture),
+        bool boolean => boolean ? "true" : "false",
+        _ => null,
+    };
+
+    private static int? ToInt(object? value) => value switch
+    {
+        long integer when integer >= int.MinValue && integer <= int.MaxValue => (int)integer,
+        double number when number >= int.MinValue && number <= int.MaxValue => (int)Math.Round(number),
+        string text when int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
+        _ => null,
+    };
+
+    private static long? ToLong(object? value) => value switch
+    {
+        long integer => integer,
+        double number when number >= long.MinValue && number <= long.MaxValue => (long)Math.Round(number),
+        string text when long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
+        _ => null,
+    };
+
+    private static bool ToBool(object? value) => value switch
+    {
+        bool boolean => boolean,
+        long integer => integer != 0,
+        double number => Math.Abs(number) > double.Epsilon,
+        string text when bool.TryParse(text, out var parsed) => parsed,
+        _ => false,
+    };
 
     private static HashSet<string> GetGroupNames(LuaTable group)
     {
