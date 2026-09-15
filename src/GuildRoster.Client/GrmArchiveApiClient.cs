@@ -81,6 +81,7 @@ internal static class GrmArchiveApiClient
         string bearerToken,
         long offerId,
         string decision,
+        IReadOnlyList<string>? selectedFields = null,
         CancellationToken cancellationToken = default)
     {
         var server = NormalizeServer(serverBaseUrl);
@@ -89,7 +90,13 @@ internal static class GrmArchiveApiClient
             HttpMethod.Post,
             $"{server}/api/v1/roster/recovery-offers/{offerId}/decision")
         {
-            Content = JsonContent.Create(new RecoveryDecisionRequest { Decision = decision }, options: JsonOptions),
+            Content = JsonContent.Create(
+                new RecoveryDecisionRequest
+                {
+                    Decision = decision,
+                    SelectedFields = selectedFields?.ToList() ?? new List<string>(),
+                },
+                options: JsonOptions),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
 
@@ -194,6 +201,9 @@ internal static class GrmArchiveApiClient
     {
         [JsonPropertyName("decision")]
         public required string Decision { get; init; }
+
+        [JsonPropertyName("selected_fields")]
+        public required List<string> SelectedFields { get; init; }
     }
 
     private sealed class ApiError
