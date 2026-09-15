@@ -93,14 +93,14 @@ internal sealed class RosterSyncService
         }
         catch (Exception ex) when (IsRetryable(ex, cancellationToken))
         {
-            var queued = GetQueuedCount();
+            var queuedDuringRegistration = GetQueuedCount();
             return new RosterSyncOutcome(
                 parsed.Members.Count,
                 0,
-                queued,
+                queuedDuringRegistration,
                 currentChanged,
                 parsed.CapturedAt,
-                $"Services01 unavailable; {queued:N0} validated snapshot(s) queued for retry. {ex.Message}");
+                $"Services01 unavailable; {queuedDuringRegistration:N0} validated snapshot(s) queued for retry. {ex.Message}");
         }
 
         var uploaded = 0;
