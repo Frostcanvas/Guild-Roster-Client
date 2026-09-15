@@ -91,7 +91,7 @@ jobs:
           path: publish/installer/GuildRosterClient-Setup.exe
           if-no-files-found: error
 
-      - name: Publish private GitHub Release
+      - name: Publish GitHub Release
         if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release client v')
         shell: pwsh
         env:
@@ -104,21 +104,18 @@ jobs:
           $notes = @"
           FrostLabs Guild Roster Client $version
 
-          Private source release for FrostLabs. The installed client receives automatic updates from the LAN-only Services01 Guild Roster API update feed after this installer is published there.
+          Public GitHub release for the standalone FrostLabs Guild Roster Client. Beta 4 and later query this repository's Releases API directly for automatic updates. The installer verifies its GitHub-provided SHA-256 digest and expected size before execution.
           "@
           Set-Content -Path "release-notes.tmp.md" -Value $notes -Encoding UTF8
 
           gh release view $tag 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            if ($prerelease) {
-              gh release create $tag --target $env:GITHUB_SHA --title "Guild Roster Client v$version" --notes-file "release-notes.tmp.md" --prerelease
-            }
-            else {
-              gh release create $tag --target $env:GITHUB_SHA --title "Guild Roster Client v$version" --notes-file "release-notes.tmp.md"
-            }
-          }
-          else {
-            gh release edit $tag --notes-file "release-notes.tmp.md"
+          if ($LASTEXITCODE -eq 0) {
+            throw "Release $tag already exists. Bump the client version instead of replacing an existing release."
           }
 
-          gh release upload $tag $asset --clobber
+          if ($prerelease) {
+            gh release create $tag --target $env:GITHUB_SHA --title "Guild Roster Client v$version" --notes-file "release-notes.tmp.md" --prerelease $asset
+          }
+          else {
+            gh release create $tag --target $env:GITHUB_SHA --title "Guild Roster Client v$version" --notes-file "release-notes.tmp.md" $asset
+          }
