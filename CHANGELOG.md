@@ -6,6 +6,13 @@ The project follows a simple chronological changelog while the client is under i
 
 ## [Unreleased]
 
+### Release process
+
+- Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version.
+- Current progression is `0.1.0-beta.3`; the next functional client test build will be `0.1.0-beta.4`, followed by `beta.5`, `beta.6`, and so on.
+- Internal source/documentation commits may occur between installer releases without consuming a beta number.
+- This policy avoids stale installer caches, ambiguous update manifests, and same-version replacement issues encountered in earlier client work.
+
 ### Planned integration
 
 - Extend the normalized server model for GRM main/alt relationships and selected GRM historical/backfill fields.
