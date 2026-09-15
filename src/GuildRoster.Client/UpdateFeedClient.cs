@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
@@ -14,11 +13,11 @@ internal sealed record RemoteClientPackage(
 
 internal sealed class UpdateFeedClient : IDisposable
 {
+    private const string Owner = "Frostcanvas";
+    private const string ReleaseRepository = "Guild-Roster-Client-Releases";
+    private const string InstallerAssetName = "GuildRosterClient-Setup.exe";
+
     private readonly HttpClient _httpClient;
-    private readonly JsonSerializerOptions _jsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
 
     public UpdateFeedClient()
     {
@@ -28,6 +27,8 @@ internal sealed class UpdateFeedClient : IDisposable
         };
         _httpClient.DefaultRequestHeaders.UserAgent.Add(
             new ProductInfoHeaderValue("FrostLabsGuildRosterClient", "0.1"));
+        _httpClient.DefaultRequestHeaders.Accept.Add(
+            new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
     }
 
     public async Task<RemoteClientPackage?> GetLatestAsync(
@@ -35,27 +36,46 @@ internal sealed class UpdateFeedClient : IDisposable
         string channel,
         CancellationToken cancellationToken = default)
     {
+        _ = serverBaseUrl;
+
         var normalizedChannel = string.Equals(channel, "beta", StringComparison.OrdinalIgnoreCase)
             ? "beta"
             : "stable";
 
-        var stable = await TryGetChannelAsync(serverBaseUrl, "stable", cancellationToken);
-        if (normalizedChannel == "stable")
+        var requestUri = $"https://api.github.com/repos/{Owner}/{ReleaseRepository}/releases?per_page=100";
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        RemoteClientPackage? best = null;
+        foreach (var release in document.RootElement.EnumerateArray())
         {
-            return stable;
+            if (IsDraft(release))
+            {
+                continue;
+            }
+
+            var prerelease = IsPrerelease(release);
+            if (normalizedChannel == "stable" && prerelease)
+            {
+                continue;
+            }
+
+            var package = TryReadPackage(release, prerelease ? "beta" : "stable");
+            if (package is null)
+            {
+                continue;
+            }
+
+            if (best is null || ReleaseVersionUtility.IsNewer(best.Version, package.Version))
+            {
+                best = package;
+            }
         }
 
-        var beta = await TryGetChannelAsync(serverBaseUrl, "beta", cancellationToken);
-        if (stable is null)
-        {
-            return beta;
-        }
-        if (beta is null)
-        {
-            return stable;
-        }
-
-        return ReleaseVersionUtility.Compare(beta.Version, stable.Version) >= 0 ? beta : stable;
+        return best;
     }
 
     public async Task DownloadAsync(
@@ -88,50 +108,67 @@ internal sealed class UpdateFeedClient : IDisposable
         }
     }
 
-    private async Task<RemoteClientPackage?> TryGetChannelAsync(
-        string serverBaseUrl,
-        string channel,
-        CancellationToken cancellationToken)
+    private static RemoteClientPackage? TryReadPackage(JsonElement release, string channel)
     {
-        var baseUri = new Uri(serverBaseUrl.TrimEnd('/') + "/", UriKind.Absolute);
-        var requestUri = new Uri(baseUri, $"api/v1/client-updates/latest?channel={Uri.EscapeDataString(channel)}");
-
-        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
-        if (response.StatusCode == HttpStatusCode.NotFound)
+        var tag = release.TryGetProperty("tag_name", out var tagValue)
+            ? tagValue.GetString()
+            : null;
+        var version = ReleaseVersionUtility.Normalize(tag);
+        if (string.IsNullOrWhiteSpace(version) || string.Equals(version, "unknown", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var wire = await JsonSerializer.DeserializeAsync<UpdateManifestWire>(stream, _jsonOptions, cancellationToken);
-        if (wire is null || string.IsNullOrWhiteSpace(wire.Version) || string.IsNullOrWhiteSpace(wire.DownloadUrl))
+        if (!release.TryGetProperty("assets", out var assets))
         {
-            throw new InvalidDataException("The Guild Roster Client update feed returned an incomplete manifest.");
+            return null;
         }
 
-        var downloadUri = Uri.TryCreate(wire.DownloadUrl, UriKind.Absolute, out var absolute)
-            ? absolute
-            : new Uri(baseUri, wire.DownloadUrl.TrimStart('/'));
+        foreach (var asset in assets.EnumerateArray())
+        {
+            var name = asset.TryGetProperty("name", out var nameValue)
+                ? nameValue.GetString()
+                : null;
+            if (!string.Equals(name, InstallerAssetName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
 
-        return new RemoteClientPackage(
-            wire.Channel ?? channel,
-            ReleaseVersionUtility.Normalize(wire.Version),
-            downloadUri.ToString(),
-            wire.Sha256 ?? string.Empty,
-            wire.Size,
-            wire.PublishedAt ?? string.Empty);
+            var downloadUrl = asset.TryGetProperty("browser_download_url", out var urlValue)
+                ? urlValue.GetString()
+                : null;
+            var digest = asset.TryGetProperty("digest", out var digestValue)
+                ? digestValue.GetString()
+                : null;
+            var size = asset.TryGetProperty("size", out var sizeValue) && sizeValue.TryGetInt64(out var parsedSize)
+                ? parsedSize
+                : 0;
+            var publishedAt = release.TryGetProperty("published_at", out var publishedValue)
+                ? publishedValue.GetString()
+                : null;
+
+            if (string.IsNullOrWhiteSpace(downloadUrl) || string.IsNullOrWhiteSpace(digest))
+            {
+                return null;
+            }
+
+            return new RemoteClientPackage(
+                channel,
+                version,
+                downloadUrl,
+                digest,
+                size,
+                publishedAt ?? string.Empty);
+        }
+
+        return null;
     }
+
+    private static bool IsDraft(JsonElement release) =>
+        release.TryGetProperty("draft", out var draftValue) && draftValue.ValueKind == JsonValueKind.True;
+
+    private static bool IsPrerelease(JsonElement release) =>
+        release.TryGetProperty("prerelease", out var prereleaseValue) && prereleaseValue.ValueKind == JsonValueKind.True;
 
     public void Dispose() => _httpClient.Dispose();
-
-    private sealed class UpdateManifestWire
-    {
-        public string? Channel { get; set; }
-        public string? Version { get; set; }
-        public string? DownloadUrl { get; set; }
-        public string? Sha256 { get; set; }
-        public long Size { get; set; }
-        public string? PublishedAt { get; set; }
-    }
 }
