@@ -10,14 +10,51 @@ The project follows a simple chronological changelog while the client is under i
 
 - Link roster identities to Discord numeric user IDs through the shared Guild Roster database.
 - Allow Guild Executive to consume the shared Guild Roster person/identity view without becoming the canonical roster store.
-- Add selected GRM historical/backfill fields after current main/alt identity is proven live.
+- Add the deferred passive `Review Notes (X)` workflow for the alphabetical manual Public/Officer note repair queue after the broader roster/Discord/Guild Executive integration work is complete.
 
 ### Release process
 
 - Every user-testable beta installer gets a new monotonically increasing prerelease number. A released or handed-off beta is never rebuilt or overwritten under the same version.
-- After `0.1.0-beta.5`, the next functional client test build is `beta.6`, then `beta.7`, and so on.
+- After `0.1.0-beta.6`, the next functional client test build is `beta.7`, then `beta.8`, and so on.
 - Internal source/documentation commits may occur between installer releases without consuming a beta number.
 - The GitHub Actions release step fails if the release tag already exists instead of overwriting the existing installer.
+
+## 0.1.0 Beta 6 - 2026-09-15
+
+### Added
+
+- Added a lossless full-GRM archive parser that safely captures every detected top-level `GRM_*` SavedVariables assignment without executing Lua.
+- Added a separate SHA-256-deduplicated GRM archive outbox so validated archive state can retry independently from FGR1 roster snapshots.
+- Added current/former-member restore profiles keyed by the complete Blizzard Player GUID.
+- Added preservation of Public/Officer/Custom note evidence, complete join-date history, read-only rank history, main/alt structures, birthday/nickname data, leave-time identity evidence, and raw safely parsed member structures.
+- Added parsing of GRM public-note event type 4 and officer-note event type 5 history so removed values, including earlier `Joined:` officer notes, remain recovery evidence.
+- Added Services01 full-archive ingestion through `POST /api/v1/grm/archive`.
+- Added exact-GUID returning-member recovery offers through `GET /api/v1/roster/recovery-offers` and `POST /api/v1/roster/recovery-offers/{offer_id}/decision`.
+- Added `Review & Restore`, `Keep Current`, and `Ask Later` decisions for canonical `Inactive -> Active` rejoin events.
+- Added selected-field recording for approved recovery categories while keeping actual write-back as a separate future explicit step.
+
+### Safety
+
+- Automatic returning-member recovery requires the exact historical complete Player GUID and a canonical `rejoined` event. Same-name/different-GUID records never auto-restore.
+- `first_seen` characters do not receive automatic recovery offers.
+- Existing join/leave/rejoin evidence is preserved rather than replaced.
+- Guild-rank restoration remains prohibited; rank history is archive/display evidence only.
+- Beta 6 does not automatically write recovered Public/Officer/Custom notes, join history, main/alt, birthdays, or nicknames back into WoW or GRM.
+- Manual Public/Officer note repair remains deferred and passive; the planned `Review Notes (X)` workflow will not interrupt normal synchronization.
+
+### Services01 / recovery evidence
+
+- Matching Services01 Beta 6 archive/recovery routes and schema passed static validation and isolated live apply before release.
+- The required single bootstrap recovery verification passed: repository and live `Dockerfile`, `app/archive.py`, and `app/bootstrap.py` matched; the installer stages the archive/bootstrap modules; and the live container runs `uvicorn app.bootstrap:app --host 0.0.0.0 --port 8000 --no-access-log`.
+- No certified Services01 backup was promoted by this release.
+
+### Release evidence
+
+- Release tag: `client-v0.1.0-beta.6`.
+- Release commit: `f28879699f21b097ff1f708b87d9fc0ce472cb73`.
+- GitHub Actions run: `34934087361`.
+- Windows restore, self-contained publish, executable verification, installer build, artifact upload, and public prerelease publication all passed.
+- Installer: `GuildRosterClient-Setup.exe`, 37,294,046 bytes, SHA-256 `65f783cb58dd4ea11d4d501157f8b73902b0397ff01c97b334838cfad71bc9af`.
 
 ## 0.1.0 Beta 5 - 2026-09-14
 
